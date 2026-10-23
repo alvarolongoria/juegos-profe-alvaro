@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Enciende las estrellas</title>
+    <link rel="stylesheet" href="../assets/common.css" />
+    <style>
+      body { background: radial-gradient(ellipse at bottom, #263b70, #090d26); }
+      .sky { position: absolute; inset: 112px 12px 20px; }
+      .star { position: absolute; display: grid; place-items: center; transform: translate(-50%, -50%); }
+      .star::before { content: ''; width: 90%; height: 90%; background: #747c90;
+        clip-path: polygon(50% 0%, 62% 34%, 98% 35%, 70% 57%, 80% 94%, 50% 73%, 20% 94%, 30% 57%, 2% 35%, 38% 34%); }
+      .star.lit::before { background: #ffdc59; }
+      .star.lit { filter: drop-shadow(0 0 12px #ffd54f); }
+      .star.next { filter: drop-shadow(0 0 12px #fff3ab); animation: beckon 1.5s ease-in-out infinite; }
+      .star.next::before { background: #b8bed0; }
+      .trail { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+      @keyframes beckon { 50% { scale: 1.06; } }
+      @media (prefers-reduced-motion: reduce) {
+        .star.next { animation: none; }
+        .particle, .confetti, .wrong-button-hint { animation-duration: 0.01ms; animation-delay: 0s; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="sky" aria-label="Cielo de estrellas"></main>
+    <script src="../assets/common.js"></script>
+    <script>
+      const LEVELS = [130, 100, 100, 70];
+      const SPOTS = [[.07,.12],[.28,.12],[.5,.12],[.72,.12],[.93,.12],
+        [.07,.87],[.28,.87],[.5,.87],[.72,.87],[.93,.87]];
+      const TRAIL = [[.08,.2],[.25,.13],[.43,.21],[.61,.13],[.82,.23],
+        [.77,.47],[.58,.63],[.4,.76],[.65,.87],[.91,.81]];
+      const sky = document.querySelector('.sky');
+      const progress = Juegos.progress(10);
+      const medals = Juegos.medals();
+      Juegos.homeButton();
+      Juegos.guardRightClick();
+      let level = 0;
+      let successes = 0;
+      let playing = false;
+
+      // Out-of-order trail star: soft sound, at most once per second per star.
+      function wrongStar(el, index) {
+        if (!playing || level < 2 || index === successes || el.classList.contains('lit')) return;
+        const now = performance.now();
+        if (now - (el.lastHint || -Infinity) < 1000) return;
+        el.lastHint = now;
+        Juegos.sound.oops();
+      }
+
+      function hintNext() {
+        sky.querySelectorAll('.star').forEach((el, index) => {
+          el.classList.toggle('next', level >= 2 && index === successes && playing);
+        });
+      }
+
+      async function light(el, index) {
+        if (!playing || el.classList.contains('lit')) return;
+        if (level >= 2 && index !== successes) return;
+        el.classList.add('lit');
+        el.setAttribute('aria-label', 'Estrella encendida');
+        Juegos.sound.star();
+        const box = el.getBoundingClientRect();
+        Juegos.burst(box.x + box.width / 2, box.y + box.height / 2, '✨');
+        successes += 1;
+        progress.set(successes);
+        if (successes === 10) {
+          playing = false;
+          hintNext();
+          const lastLevel = level === LEVELS.length - 1;
+          medals.add(lastLevel ? '🏆' : '🏅');
+          await Juegos.celebrate(lastLevel ? '🏆' : '🎉');
+          level = Math.min(level + 1, LEVELS.length - 1);
+          startLevel();
+        } else hintNext();
+      }
+
+      function startLevel() {
+        sky.replaceChildren();
+        successes = 0;
+        progress.set(0);
+        playing = true;
+        const spots = level >= 2 ? TRAIL : SPOTS;
+        // A local SVG helper draws the trail without external image assets.
+        if (level >= 2) {
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          svg.classList.add('trail');
+          svg.setAttribute('viewBox', '0 0 1000 1000');
+          svg.setAttribute('preserveAspectRatio', 'none');
+          svg.setAttribute('aria-hidden', 'true');
+          const path = document.createElementNS(svg.namespaceURI, 'path');
+          let d = `M ${spots[0][0] * 1000} ${spots[0][1] * 1000}`;
+          for (let i = 1; i < spots.length; i++) {
+            const [x, y] = spots[i];
+            const [px, py] = spots[i - 1];
+            d += ` C ${(px + x) * 500} ${py * 1000}, ${(px + x) * 500} ${y * 1000}, ${x * 1000} ${y * 1000}`;
+          }
+          path.setAttribute('d', d);
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke', '#ffffff30');
+          path.setAttribute('stroke-width', '4');
+          path.setAttribute('stroke-dasharray', '8 12');
+          svg.appendChild(path);
+          sky.appendChild(svg);
+        }
+        spots.forEach(([x, y], index) => {
+          const el = document.createElement('div');
+          el.className = 'star';
+          el.setAttribute('role', 'img');
+          el.setAttribute('aria-label', 'Estrella apagada');
+          el.style.left = `${x * 100}%`;
+          el.style.top = `${y * 100}%`;
+          el.style.width = el.style.height = `${LEVELS[level]}px`;
+          // Movement only: pressing buttons never adds another success.
+          el.addEventListener('pointermove', () => light(el, index));
+          el.addEventListener('pointerenter', () => wrongStar(el, index));
+          sky.appendChild(el);
+        });
+        hintNext();
+      }
+
+      Juegos.startScreen('🌟').then(startLevel);
+    </script>
+  </body>
+</html>
