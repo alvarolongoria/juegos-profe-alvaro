@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pinta el Camino</title>
+    <link rel="stylesheet" href="../assets/common.css" />
+    <style>
+      body {
+        background: linear-gradient(135deg, #fed7aa, #fbcfe8 55%, #c7d2fe);
+      }
+
+      .sun {
+        position: absolute;
+        right: 40px;
+        top: 110px;
+        width: 90px;
+        height: 90px;
+        border-radius: 50%;
+        background: radial-gradient(#fde047 45%, transparent 47%),
+          repeating-conic-gradient(#facc15 0 10deg, transparent 10deg 30deg);
+        animation: spin 12s linear infinite;
+      }
+
+      .drawing {
+        position: absolute;
+        left: 50%;
+        top: 108px;
+        width: min(900px, 90vw);
+        transform: translateX(-50%);
+      }
+
+      .drawing svg {
+        width: 100%;
+        height: auto;
+        overflow: visible;
+      }
+
+      .drawing .zone {
+        stroke: #334155;
+        stroke-width: 5;
+        stroke-linejoin: round;
+        transition: fill 0.3s;
+      }
+
+      .drawing .decor {
+        pointer-events: none;
+      }
+
+      .drawing.alive svg {
+        animation: wiggle 0.5s ease-in-out 2;
+        transform-origin: 50% 80%;
+      }
+
+      .start-palette {
+        width: 230px;
+        height: 180px;
+      }
+
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes wiggle { 25% { transform: rotate(-4deg) scale(1.04); } 75% { transform: rotate(4deg) scale(1.04); } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .sun, .drawing.alive svg { animation: none; }
+        .drawing .zone { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sun" aria-hidden="true"></div>
+    <script src="../assets/common.js"></script>
+    <script>
+      const GREY = "#f1f5f9";
+      const ZONES_PER_LEVEL = [3, 5, 7];
+      const DRAWINGS_PER_LEVEL = 3;
+      const RAINBOW = ["#ef4444", "#f97316", "#facc15", "#22c55e", "#3b82f6", "#6366f1", "#a855f7"];
+
+      // ---------- Drawings, generated for any number of zones ----------
+      // Each returns { zones: [{ d, color }], decor: "<svg markup>" } in a 600x400 box.
+      function rainbow(k) {
+        const cx = 300, cy = 370, outer = 290, band = 200 / k;
+        const zones = [];
+        for (let i = 0; i < k; i++) {
+          const r1 = outer - i * band, r2 = r1 - band;
+          zones.push({
+            d: `M${cx - r1} ${cy} A${r1} ${r1} 0 0 1 ${cx + r1} ${cy} L${cx + r2} ${cy} A${r2} ${r2} 0 0 0 ${cx - r2} ${cy}Z`,
+            color: RAINBOW[Math.round((i * (RAINBOW.length - 1)) / Math.max(1, k - 1))],
+          });
+        }
+        const decor = `<g class="decor"><ellipse cx="70" cy="372" rx="70" ry="26" fill="#fff"/><ellipse cx="530" cy="372" rx="70" ry="26" fill="#fff"/></g>`;
+        return { zones, decor };
+      }
+
+      function flower(k) {
+        const cx = 300, cy = 170, petals = k - 1, rx = 52, ry = 32, dist = 82;
+        const colors = ["#f472b6", "#fb7185", "#c084fc", "#60a5fa", "#f97316", "#facc15"];
+        const zones = [];
+        for (let i = 0; i < petals; i++) {
+          const a = (Math.PI * 2 * i) / petals - Math.PI / 2;
+          const px = cx + Math.cos(a) * dist, py = cy + Math.sin(a) * dist;
+          const dx = Math.cos(a) * rx, dy = Math.sin(a) * rx;
+          const rot = (a * 180) / Math.PI;
+          zones.push({
+            d: `M${px - dx} ${py - dy} A${rx} ${ry} ${rot} 1 0 ${px + dx} ${py + dy} A${rx} ${ry} ${rot} 1 0 ${px - dx} ${py - dy}Z`,
+            color: colors[i % colors.length],
+          });
+        }
+        zones.push({ d: `M${cx - 44} ${cy} A44 44 0 1 0 ${cx + 44} ${cy} A44 44 0 1 0 ${cx - 44} ${cy}Z`, color: "#fde047" });
+        const decor = `<g class="decor"><path d="M300 260 Q290 330 300 400" stroke="#16a34a" stroke-width="12" fill="none" stroke-linecap="round"/>
+          <path d="M296 340 Q240 320 230 290 Q280 296 296 330Z" fill="#4ade80" stroke="#15803d" stroke-width="4"/></g>`;
+        return { zones, decor };
+      }
+
+      function fish(k) {
+        const cx = 270, cy = 200, a = 190, b = 120, slices = k - 1;
+        const left = cx - a, width = (2 * a) / slices;
+        const colors = ["#fb923c", "#facc15", "#f87171", "#fdba74"];
+        const zones = [];
+        for (let i = 0; i < slices; i++) {
+          const x0 = left + i * width, x1 = x0 + width;
+          const top = [], bottom = [];
+          for (let s = 0; s <= 12; s++) {
+            const x = x0 + ((x1 - x0) * s) / 12;
+            const h = b * Math.sqrt(Math.max(0, 1 - ((x - cx) / a) ** 2));
+            top.push(`${x.toFixed(1)} ${(cy - h).toFixed(1)}`);
+            bottom.unshift(`${x.toFixed(1)} ${(cy + h).toFixed(1)}`);
+          }
+          zones.push({ d: `M${top.join(" L")} L${bottom.join(" L")}Z`, color: colors[i % colors.length] });
+        }
+        zones.push({ d: "M452 200 L565 105 Q538 200 565 295Z", color: "#a855f7" });
+        const decor = `<g class="decor"><circle cx="150" cy="175" r="18" fill="#fff" stroke="#334155" stroke-width="4"/><circle cx="146" cy="175" r="8" fill="#1e293b"/>
+          <path d="M100 225 Q120 240 140 228" stroke="#334155" stroke-width="5" fill="none" stroke-linecap="round"/>
+          <circle cx="40" cy="120" r="10" fill="none" stroke="#38bdf8" stroke-width="4"/><circle cx="20" cy="80" r="7" fill="none" stroke="#38bdf8" stroke-width="4"/></g>`;
+        return { zones, decor };
+      }
+
+      const DRAWINGS = [rainbow, flower, fish];
+
+      const progress = Juegos.progress(DRAWINGS_PER_LEVEL);
+      const medals = Juegos.medals();
+      Juegos.homeButton();
+      Juegos.guardRightClick();
+
+      let level = 0;
+      let finished = 0;
+      let current = null;
+
+      function showDrawing() {
+        if (current) current.remove();
+        const k = ZONES_PER_LEVEL[Math.min(level, ZONES_PER_LEVEL.length - 1)];
+        const { zones, decor } = DRAWINGS[finished % DRAWINGS.length](k);
+        current = document.createElement("div");
+        current.className = "drawing";
+        current.setAttribute("role", "img");
+        current.setAttribute("aria-label", "Dibujo para pintar");
+        current.innerHTML = `<svg viewBox="0 0 600 400" aria-hidden="true">${zones
+          .map((z) => `<path class="zone" d="${z.d}" fill="${GREY}" data-color="${z.color}"/>`)
+          .join("")}${decor}</svg>`;
+        // Passing over a zone is enough: no click needed.
+        current.addEventListener("pointerover", (e) => paint(e.target, e.clientX, e.clientY));
+        document.body.append(current);
+      }
+
+      function paint(zone, x, y) {
+        if (!zone.classList || !zone.classList.contains("zone") || zone.classList.contains("painted")) return;
+        if (current.classList.contains("alive")) return;
+        zone.classList.add("painted");
+        zone.setAttribute("fill", zone.dataset.color);
+        Juegos.sound.pop();
+        Juegos.burst(x, y, "✨", 5);
+        if (!current.querySelector(".zone:not(.painted)")) drawingDone();
+      }
+
+      function drawingDone() {
+        current.classList.add("alive");
+        Juegos.sound.star();
+        const box = current.getBoundingClientRect();
+        Juegos.burst(box.x + box.width / 2, box.y + box.height / 2, "⭐", 12);
+        finished++;
+        progress.set(finished);
+        if (finished >= DRAWINGS_PER_LEVEL) setTimeout(finishLevel, 1100);
+        else setTimeout(showDrawing, 1400);
+      }
+
+      async function finishLevel() {
+        current.remove();
+        current = null;
+        const last = level >= ZONES_PER_LEVEL.length - 1;
+        medals.add(last ? "🏆" : "🏅");
+        await Juegos.celebrate(last ? "🏆" : "🎉");
+        level = Math.min(level + 1, ZONES_PER_LEVEL.length - 1);
+        startLevel();
+      }
+
+      function startLevel() {
+        finished = 0;
+        progress.set(0);
+        showDrawing();
+      }
+
+      const startArt = document.createElement("div");
+      startArt.className = "start-palette";
+      startArt.innerHTML = `<svg viewBox="0 0 230 180" aria-hidden="true">
+        <path d="M115 10 Q220 10 220 90 Q220 150 160 140 Q130 135 130 160 Q128 178 100 172 Q10 160 10 90 Q10 10 115 10Z" fill="#fde68a" stroke="#92400e" stroke-width="6"/>
+        <circle cx="60" cy="70" r="16" fill="#ef4444"/><circle cx="105" cy="45" r="16" fill="#3b82f6"/>
+        <circle cx="155" cy="55" r="16" fill="#22c55e"/><circle cx="185" cy="98" r="16" fill="#a855f7"/>
+        <circle cx="60" cy="120" r="16" fill="#f97316"/></svg>`;
+      Juegos.startScreen(startArt).then(startLevel);
+    </script>
+  </body>
+</html>
