@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gran Carrera</title>
+    <link rel="stylesheet" href="../assets/common.css" />
+    <style>
+      body {
+        background: #1e1b4b;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ---------- Race scene ---------- */
+      .scene {
+        position: relative;
+        flex: 0 0 auto;
+        height: 372px;
+        margin-top: 104px;
+        overflow: hidden;
+        background: linear-gradient(#38bdf8, #bae6fd 60%);
+      }
+
+      .hills {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        width: 100%;
+        height: 110px;
+      }
+
+      .cloud {
+        position: absolute;
+        height: 26px;
+        border-radius: 20px;
+        background: #fff;
+        opacity: 0.9;
+        animation: drift 40s linear infinite;
+      }
+
+      .cloud::before {
+        content: "";
+        position: absolute;
+        left: 18px;
+        top: -16px;
+        width: 40px;
+        height: 36px;
+        border-radius: 50%;
+        background: #fff;
+      }
+
+      .track {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 268px;
+        background:
+          repeating-linear-gradient(90deg, #fde047 0 40px, transparent 40px 80px) 0 63px / 100% 4px no-repeat,
+          repeating-linear-gradient(90deg, #fde047 0 40px, transparent 40px 80px) 0 128px / 100% 4px no-repeat,
+          repeating-linear-gradient(90deg, #fde047 0 40px, transparent 40px 80px) 0 193px / 100% 4px no-repeat,
+          linear-gradient(#4c1d95, #3b0764);
+        border-top: 8px solid #f472b6;
+        animation: road 0.9s linear infinite;
+      }
+
+      .finish-line {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 28px;
+        background: conic-gradient(#fff 25%, #111 0 50%, #fff 0 75%, #111 0) 0 0 / 28px 28px;
+      }
+
+      .lane {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 65px;
+      }
+
+      .racer {
+        position: absolute;
+        top: 2px;
+        width: 120px;
+        height: 62px;
+        transition: filter 0.2s;
+      }
+
+      .racer svg {
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+
+      .racer .flame {
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+
+      .racer.player {
+        filter: drop-shadow(0 0 8px #fde047);
+      }
+
+      .racer.player .flame,
+      .racer.boost .flame {
+        opacity: 1;
+      }
+
+      .racer.player:not(.boost):not(.turbo) .flame {
+        opacity: 0;
+      }
+
+      .racer.turbo .flame {
+        transform: scaleX(1.8);
+        transform-origin: 18px 34px;
+      }
+
+      .racer.turbo {
+        filter: drop-shadow(0 0 14px #fb923c);
+      }
+
+      .racer.skid svg {
+        animation: skid 0.6s ease-in-out;
+      }
+
+      .racer .wheel {
+        animation: spin 0.4s linear infinite;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .racer[data-finished="1"] .wheel {
+        animation: none;
+      }
+
+      /* ---------- Question panel ---------- */
+      .panel {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        padding: 18px;
+      }
+
+      .question {
+        display: flex;
+        align-items: center;
+        gap: 36px;
+        padding: 18px 32px;
+        border-radius: 32px;
+        background: #fff;
+        box-shadow: 0 10px 0 #a78bfa;
+        border-top: 18px solid #f472b6;
+      }
+
+      .prompt {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 340px;
+        justify-content: center;
+        font-size: 64px;
+        font-weight: 800;
+        color: #3b0764;
+      }
+
+      .group {
+        display: grid;
+        grid-template-columns: repeat(3, 46px);
+        gap: 4px;
+        font-size: 40px;
+        line-height: 46px;
+        text-align: center;
+      }
+
+      .picture {
+        font-size: 96px;
+      }
+
+      .answers {
+        display: flex;
+        gap: 18px;
+      }
+
+      .answer {
+        width: 120px;
+        height: 120px;
+        border: none;
+        border-radius: 28px;
+        background: #ede9fe;
+        box-shadow: 0 8px 0 #8b5cf6;
+        font: 800 64px "Segoe UI", system-ui, sans-serif;
+        color: #3b0764;
+        transition: transform 0.12s;
+      }
+
+      .answer:hover {
+        transform: translateY(-4px) scale(1.05);
+      }
+
+      .answer.right,
+      .answer.reveal {
+        background: #86efac;
+        box-shadow: 0 8px 0 #16a34a;
+      }
+
+      .answer.right {
+        animation: pop 0.4s ease-out;
+      }
+
+      .answer.reveal {
+        animation: beckon 0.6s ease-in-out 2;
+      }
+
+      .answer.wrong {
+        background: #fecaca;
+        box-shadow: 0 8px 0 #dc2626;
+        animation: shake 0.45s ease-in-out;
+      }
+
+      .mascot-box {
+        width: 130px;
+        height: 150px;
+      }
+
+      .mascot-box.cheer {
+        animation: hop 0.5s ease-out;
+      }
+
+      .mascot-box.sad {
+        animation: tilt 0.6s ease-in-out;
+      }
+
+      .mascot .eye {
+        animation: blink 4s infinite;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .flash-ok {
+        position: fixed;
+        z-index: 45;
+        font-size: 64px;
+        pointer-events: none;
+        animation: rise 0.9s ease-out forwards;
+      }
+
+      /* ---------- Finish podium ---------- */
+      .start-art {
+        display: flex;
+        align-items: flex-end;
+        gap: 20px;
+      }
+
+      .start-art .mascot {
+        width: 200px;
+        height: 230px;
+      }
+
+      .start-art .kart {
+        width: 220px;
+        height: 115px;
+      }
+
+      .podium {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        font-size: 120px;
+        line-height: 1;
+      }
+
+      .podium .place {
+        font: 900 64px "Segoe UI", system-ui, sans-serif;
+        color: #fff;
+        text-shadow: 0 5px 0 #7c3aed;
+      }
+
+      @keyframes road { to { background-position: -80px 63px, -80px 128px, -80px 193px, 0 0; } }
+      @keyframes drift { from { transform: translateX(110vw); } to { transform: translateX(-200px); } }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes skid { 25% { transform: rotate(-12deg) translateX(-8px); } 60% { transform: rotate(9deg); } }
+      @keyframes pop { 50% { transform: scale(1.2); } }
+      @keyframes beckon { 50% { transform: scale(1.12); } }
+      @keyframes shake { 20%, 60% { transform: translateX(-10px); } 40%, 80% { transform: translateX(10px); } }
+      @keyframes hop { 40% { transform: translateY(-26px); } }
+      @keyframes tilt { 30% { transform: rotate(-10deg); } 70% { transform: rotate(6deg); } }
+      @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
+      @keyframes rise { to { transform: translateY(-120px) scale(1.4); opacity: 0; } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .track, .cloud, .racer .wheel, .mascot .eye { animation: none; }
+        .flash-ok { animation-duration: 0.01ms; }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="scene" aria-label="Pista de carreras">
+      <svg class="hills" viewBox="0 0 1000 110" preserveAspectRatio="none" aria-hidden="true">
+        <circle cx="880" cy="34" r="24" fill="#fde047" />
+        <path d="M0 110 C120 30 220 40 330 90 S560 20 700 80 S900 40 1000 70 V110Z" fill="#86efac" />
+        <path d="M0 110 C160 70 260 80 400 100 S700 60 820 95 S950 85 1000 100 V110Z" fill="#4ade80" />
+      </svg>
+      <div class="cloud" style="top: 14px; width: 90px; animation-delay: -6s"></div>
+      <div class="cloud" style="top: 40px; width: 70px; animation-delay: -24s"></div>
+      <div class="track"></div>
+    </section>
+    <section class="panel">
+      <div class="mascot-box" aria-hidden="true"></div>
+      <div class="question" data-ready="0" aria-live="polite">
+        <div class="prompt"></div>
+        <div class="answers"></div>
+      </div>
+    </section>
+    <script src="../assets/common.js"></script>
+    <script>
+      // ---------- Question bank, keyed by school year ----------
+      // Adding 2º or 3º only needs new entries here: `number` and `letter`
+      // generators alternate so numbers and letters are mixed.
+      const COUNT_ITEMS = ["🍎", "⭐", "🐟", "🌸", "🎈", "🐞", "🚗"];
+      const VOWEL_WORDS = {
+        A: ["🐝", "✈️", "🌳"],
+        E: ["🐘", "🦔"],
+        I: ["🦎", "🧲"],
+        O: ["🐻", "🐑", "👂"],
+        U: ["🍇", "🦄"],
+      };
+
+      function group(n, item) {
+        const g = document.createElement("div");
+        g.className = "group";
+        for (let i = 0; i < n; i++) g.append(Object.assign(document.createElement("span"), { textContent: item }));
+        return g;
+      }
+
+      function numberOptions(answer, max) {
+        const options = new Set([answer]);
+        while (options.size < 3) {
+          const near = answer + Juegos.pick([-2, -1, 1, 2]);
+          if (near >= 1 && near <= max) options.add(near);
+        }
+        return [...options].map(String);
+      }
+
+      const BANK = {
+        1: {
+          number: [
+            function count() {
+              const n = 1 + Math.floor(Math.random() * 9);
+              return { kind: "count", answer: String(n), options: numberOptions(n, 9), prompt: [group(n, Juegos.pick(COUNT_ITEMS))] };
+            },
+            function sum() {
+              const a = 1 + Math.floor(Math.random() * 5);
+              const b = 1 + Math.floor(Math.random() * (9 - a));
+              const item = Juegos.pick(COUNT_ITEMS);
+              const plus = Object.assign(document.createElement("span"), { textContent: "+" });
+              return { kind: "sum", answer: String(a + b), options: numberOptions(a + b, 9), prompt: [group(a, item), plus, group(b, item)] };
+            },
+          ],
+          letter: [
+            function vowel() {
+              const answer = Juegos.pick(Object.keys(VOWEL_WORDS));
+              const options = new Set([answer]);
+              while (options.size < 3) options.add(Juegos.pick(Object.keys(VOWEL_WORDS)));
+              const picture = Object.assign(document.createElement("span"), { className: "picture", textContent: Juegos.pick(VOWEL_WORDS[answer]) });
+              return { kind: "vowel", answer, options: [...options], prompt: [picture] };
+            },
+          ],
+        },
+      };
+      const grade = BANK[new URLSearchParams(location.search).get("curso")] ? new URLSearchParams(location.search).get("curso") : 1;
+
+      // ---------- Drawings (inline SVG, no image files) ----------
+      function mascotSvg() {
+        return `<svg class="mascot" viewBox="0 0 130 150" aria-hidden="true">
+          <line x1="65" y1="8" x2="65" y2="30" stroke="#334155" stroke-width="5" />
+          <circle cx="65" cy="10" r="9" fill="#fde047" stroke="#f59e0b" stroke-width="3" />
+          <rect x="15" y="28" width="100" height="84" rx="30" fill="#2dd4bf" stroke="#0f766e" stroke-width="5" />
+          <rect x="30" y="44" width="70" height="44" rx="20" fill="#ecfeff" />
+          <g class="eye"><circle cx="50" cy="64" r="9" fill="#1e293b" /><circle cx="53" cy="61" r="3" fill="#fff" /></g>
+          <g class="eye"><circle cx="80" cy="64" r="9" fill="#1e293b" /><circle cx="83" cy="61" r="3" fill="#fff" /></g>
+          <circle cx="36" cy="98" r="6" fill="#f9a8d4" /><circle cx="94" cy="98" r="6" fill="#f9a8d4" />
+          <path d="M50 96 Q65 108 80 96" fill="none" stroke="#0f766e" stroke-width="5" stroke-linecap="round" />
+          <rect x="35" y="112" width="60" height="30" rx="12" fill="#14b8a6" stroke="#0f766e" stroke-width="5" />
+        </svg>`;
+      }
+
+      function kartSvg(body, helmet, number) {
+        return `<svg class="kart" viewBox="0 0 120 62" aria-hidden="true">
+          <path class="flame" d="M20 30 L0 24 L8 34 L0 44 L20 40Z" fill="#fb923c" stroke="#facc15" stroke-width="3" />
+          <path d="M18 44 Q20 26 42 24 L78 22 Q104 24 112 40 L112 48 L18 48Z" fill="${body}" stroke="#1e1b4b" stroke-width="3" />
+          <rect x="52" y="30" width="22" height="12" rx="4" fill="#fff" />
+          <text x="63" y="40" font-size="11" font-weight="900" text-anchor="middle" fill="#1e1b4b">${number}</text>
+          <circle cx="44" cy="16" r="13" fill="${helmet}" stroke="#1e1b4b" stroke-width="3" />
+          <path d="M46 10 h11 a4 4 0 0 1 0 10 h-11Z" fill="#a5f3fc" stroke="#1e1b4b" stroke-width="2" />
+          <g class="wheel"><circle cx="34" cy="50" r="10" fill="#111827" /><rect x="32" y="42" width="4" height="16" fill="#9ca3af" /></g>
+          <g class="wheel"><circle cx="96" cy="50" r="10" fill="#111827" /><rect x="94" y="42" width="4" height="16" fill="#9ca3af" /></g>
+        </svg>`;
+      }
+
+      // ---------- Race state ----------
+      const RACERS = [
+        { body: "#ef4444", helmet: "#fde047", player: true },
+        { body: "#3b82f6", helmet: "#f472b6", seconds: 75 },
+        { body: "#22c55e", helmet: "#fb923c", seconds: 90 },
+        { body: "#f59e0b", helmet: "#a78bfa", seconds: 105 },
+      ];
+      const PRIZES = ["🥇", "🥈", "🥉", "🏅"];
+      const PLACE_TEXT = ["1º", "2º", "3º", "4º"];
+      const GOAL = 10;
+
+      const scene = document.querySelector(".scene");
+      const track = document.querySelector(".track");
+      const questionBox = document.querySelector(".question");
+      const promptBox = document.querySelector(".prompt");
+      const answersBox = document.querySelector(".answers");
+      const mascotBox = document.querySelector(".mascot-box");
+      mascotBox.innerHTML = mascotSvg();
+      const progress = Juegos.progress(GOAL);
+      const medals = Juegos.medals();
+      Juegos.homeButton();
+      Juegos.guardRightClick();
+
+      const finishLine = document.createElement("div");
+      finishLine.className = "finish-line";
+      track.append(finishLine);
+      const racers = RACERS.map((cfg, i) => {
+        const lane = document.createElement("div");
+        lane.className = "lane";
+        lane.style.top = `${i * 65}px`;
+        const el = document.createElement("div");
+        el.className = `racer ${cfg.player ? "player" : "rival"}`;
+        el.innerHTML = kartSvg(cfg.body, cfg.helmet, i + 1);
+        el.setAttribute("aria-label", cfg.player ? "Tu coche" : "Coche rival");
+        lane.append(el);
+        track.append(lane);
+        return { ...cfg, el, p: 0 };
+      });
+      const player = racers[0];
+
+      let race = 0;
+      let correct = 0;
+      let streak = 0;
+      let asked = 0;
+      let racing = false;
+      let current = null;
+      let lastTime = 0;
+
+      function startX() { return 20; }
+      function finishX() { return track.clientWidth - 150; }
+
+      function layout() {
+        finishLine.style.left = `${finishX() + 118}px`;
+        for (const r of racers) r.el.style.left = `${startX() + Math.min(r.p, 1) * (finishX() - startX())}px`;
+      }
+
+      function nextQuestion() {
+        const kinds = BANK[grade][asked % 2 === 0 ? "number" : "letter"];
+        current = Juegos.pick(kinds)();
+        asked++;
+        questionBox.dataset.kind = current.kind;
+        questionBox.dataset.answer = current.answer;
+        promptBox.replaceChildren(...current.prompt);
+        answersBox.replaceChildren(
+          ...current.options.sort(() => Math.random() - 0.5).map((value) => {
+            const b = document.createElement("button");
+            b.className = "answer";
+            b.dataset.value = value;
+            b.textContent = value;
+            b.setAttribute("aria-label", `Respuesta ${value}`);
+            b.addEventListener("click", (e) => e.button === 0 && choose(value));
+            return b;
+          })
+        );
+        questionBox.dataset.ready = "1";
+      }
+
+      function pulse(el, cls, ms) {
+        el.classList.remove(cls);
+        void el.offsetWidth;
+        el.classList.add(cls);
+        setTimeout(() => el.classList.remove(cls), ms);
+      }
+
+      // Every sound has a visible twin, because classroom PCs often have no speakers.
+      function choose(value) {
+        if (!racing || questionBox.dataset.ready !== "1") return;
+        questionBox.dataset.ready = "0";
+        const button = answersBox.querySelector(`[data-value="${value}"]`);
+        if (value === current.answer) {
+          correct++;
+          streak++;
+          progress.set(correct);
+          Juegos.sound.star();
+          button.classList.add("right");
+          const box = button.getBoundingClientRect();
+          const star = Object.assign(document.createElement("div"), { className: "flash-ok", textContent: "⭐" });
+          star.style.left = `${box.x + box.width / 2 - 32}px`;
+          star.style.top = `${box.y - 40}px`;
+          document.body.append(star);
+          setTimeout(() => star.remove(), 900);
+          pulse(mascotBox, "cheer", 500);
+          pulse(player.el, "boost", 700);
+          if (streak >= 3) {
+            if (!player.el.classList.contains("turbo")) Juegos.sound.pop();
+            player.el.classList.add("turbo");
+          }
+          if (correct >= GOAL) return finishRace();
+          setTimeout(nextQuestion, 600);
+        } else {
+          streak = 0;
+          Juegos.sound.oops();
+          button.classList.add("wrong");
+          answersBox.querySelector(`[data-value="${current.answer}"]`).classList.add("reveal");
+          player.el.classList.remove("turbo");
+          pulse(player.el, "skid", 600);
+          pulse(mascotBox, "sad", 600);
+          setTimeout(nextQuestion, 1300);
+        }
+      }
+
+      window.addEventListener("keydown", (e) => {
+        if (e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+        const key = e.key.toUpperCase();
+        if (current && current.options.includes(key)) choose(key);
+      });
+
+      async function finishRace() {
+        racing = false;
+        const ahead = racers.filter((r) => !r.player && r.p >= 1).length;
+        const place = ahead + 1;
+        document.body.dataset.place = String(place);
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        player.el.dataset.finished = "1";
+        medals.add(PRIZES[place - 1]);
+        const podium = document.createElement("div");
+        podium.className = "podium";
+        podium.append(
+          Object.assign(document.createElement("div"), { textContent: PRIZES[place - 1] }),
+          Object.assign(document.createElement("div"), { className: "place", textContent: PLACE_TEXT[place - 1] })
+        );
+        await Juegos.celebrate(podium);
+        race++;
+        startRace();
+      }
+
+      function startRace() {
+        // Rivals get faster race after race, down to 60% of their first time.
+        const factor = Math.max(0.6, Math.pow(0.88, race));
+        for (const r of racers) {
+          r.p = 0;
+          r.el.dataset.finished = "0";
+          r.el.classList.remove("turbo", "boost", "skid");
+          if (!r.player) {
+            r.pace = 1 / (r.seconds * factor);
+            r.el.dataset.pace = String(Math.round(r.pace * 100000));
+          }
+        }
+        correct = 0;
+        streak = 0;
+        asked = 0;
+        progress.set(0);
+        delete document.body.dataset.place;
+        layout();
+        racing = true;
+        nextQuestion();
+      }
+
+      function loop(time) {
+        const dt = Math.min((time - lastTime) / 1000, 0.05);
+        lastTime = time;
+        if (racing) {
+          for (const r of racers) {
+            if (r.player) r.p += (correct / GOAL - r.p) * Math.min(1, dt * 5);
+            else if (r.p < 1) {
+              r.p = Math.min(1, r.p + r.pace * dt);
+              if (r.p >= 1) r.el.dataset.finished = "1";
+            }
+          }
+        } else if (correct >= GOAL) {
+          player.p += (1 - player.p) * Math.min(1, dt * 5);
+        }
+        layout();
+        requestAnimationFrame(loop);
+      }
+
+      const startArt = document.createElement("div");
+      startArt.className = "start-art";
+      startArt.innerHTML = mascotSvg() + kartSvg(RACERS[0].body, RACERS[0].helmet, 1);
+      Juegos.startScreen(startArt).then(startRace);
+      window.addEventListener("resize", layout);
+      requestAnimationFrame((t) => {
+        lastTime = t;
+        loop(t);
+      });
+    </script>
+  </body>
+</html>
