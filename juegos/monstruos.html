@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fábrica de monstruos</title>
+  <link rel="stylesheet" href="../assets/common.css" />
+  <style>
+    body { background: linear-gradient(#c4b5fd, #f5f3ff 75%, #a7f3d0); touch-action: none; }
+    .monster { position: absolute; left: calc(50% - 180px); top: 23%; width: 360px; height: 350px; border: 8px solid #ffffff99; box-shadow: inset -15px -15px 0 #00000012, 0 12px 0 #00000015; }
+    .monster::before, .monster::after { content: ''; position: absolute; bottom: -28px; width: 90px; height: 50px; background: inherit; border-radius: 50%; z-index: -1; }
+    .monster::before { left: 20px; } .monster::after { right: 20px; }
+    .slot { position: absolute; width: 100px; height: 88px; display: grid; place-items: center; border: 4px dashed #fff; border-radius: 25px; background: #ffffff55; box-shadow: 0 0 18px #fff9; font-size: 58px; animation: glow 2s ease-in-out infinite alternate; }
+    .slot span { opacity: .28; }
+    .slot.filled { border-style: solid; animation: none; background: #ffffffbb; }
+    .slot.filled span { opacity: 1; }
+    .tray { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); display: flex; gap: 18px; padding: 16px 24px; border-radius: 40px; background: #fff9; box-shadow: 0 8px 0 #0002; }
+    .part { width: 100px; height: 100px; display: grid; place-items: center; font-size: 66px; border-radius: 24px; background: white; box-shadow: 0 5px 0 #0002; touch-action: none; transition: transform .28s ease; position: relative; }
+    .part.held { z-index: 60; transition: none; }
+    .part.placed { visibility: hidden; pointer-events: none; }
+    .dancing { animation: dance .7s ease-in-out; }
+    @keyframes glow { to { box-shadow: 0 0 28px #fff; } }
+    @keyframes dance { 25% { transform: rotate(-7deg) translateY(-12px); } 75% { transform: rotate(7deg) translateY(-12px); } }
+    @media (max-height: 650px) { .monster { top: 18%; height: 300px; transform: scale(.85); transform-origin: top center; } .tray { bottom: 12px; padding: 10px; } }
+    @media (max-width: 650px) { .tray { gap: 6px; padding: 10px; } .part { width: 65px; height: 80px; font-size: 48px; } .progress { top: 100px; } .progress span { font-size: 23px; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="monster" aria-label="Monstruo"></div>
+  <div class="tray" aria-label="Piezas para arrastrar"></div>
+  <script src="../assets/common.js"></script>
+  <script>
+    const LEVELS = [{ slots: 3, tolerance: 65 }, { slots: 4, tolerance: 45 }, { slots: 5, tolerance: 20 }];
+    const PARTS = [['🎩', '👀', '👄', '🎀', '👃'], ['👑', '👓', '👅', '🌸', '⭐'], ['🎀', '👀', '👄', '🍀', '👃']];
+    const POSITIONS = [[122, -40], [122, 65], [122, 220], [12, 150], [232, 150]];
+    const COLORS = ['#4ade80', '#fb923c', '#38bdf8', '#f472b6'];
+    const monster = document.querySelector('.monster');
+    const tray = document.querySelector('.tray');
+    const progress = Juegos.progress(10);
+    const medals = Juegos.medals();
+    Juegos.homeButton();
+    Juegos.guardRightClick();
+    let level = 0;
+    let successes = 0;
+    let generation = -1;
+    let placed = 0;
+    let playing = false;
+    let active = null;
+
+    function newMonster() {
+      generation++;
+      placed = 0;
+      monster.classList.remove('dancing');
+      monster.replaceChildren();
+      tray.replaceChildren();
+      monster.style.background = COLORS[generation % COLORS.length];
+      monster.style.borderRadius = ['45% 45% 30% 30%', '35% 50% 35% 50%', '45% 30% 45% 30%'][generation % 3];
+      PARTS[generation % PARTS.length].slice(0, LEVELS[level].slots).forEach((emoji, index) => {
+        const slot = document.createElement('div');
+        slot.className = 'slot';
+        slot.dataset.slot = index;
+        slot.style.left = `${POSITIONS[index][0]}px`;
+        slot.style.top = `${POSITIONS[index][1]}px`;
+        const picture = document.createElement('span');
+        picture.textContent = emoji;
+        slot.append(picture);
+        monster.append(slot);
+        const part = document.createElement('div');
+        part.className = 'part';
+        part.dataset.slot = index;
+        part.textContent = emoji;
+        part.setAttribute('aria-label', 'Arrastra la pieza a su silueta');
+        tray.append(part);
+        attachDrag(part, slot);
+      });
+    }
+
+    // Pointer capture keeps the piece held even when the pointer leaves its tray.
+    function attachDrag(part, slot) {
+      let startX, startY;
+      part.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || !playing || active || part.classList.contains('placed')) return;
+        event.preventDefault();
+        active = part;
+        startX = event.clientX;
+        startY = event.clientY;
+        part.setPointerCapture(event.pointerId);
+        part.classList.add('held');
+        part.style.transform = 'scale(1.12)';
+      });
+      part.addEventListener('pointermove', event => {
+        if (active !== part) return;
+        part.style.transform = `translate(${event.clientX - startX}px, ${event.clientY - startY}px) scale(1.12)`;
+      });
+      function reset() {
+        if (active !== part) return;
+        active = null;
+        part.classList.remove('held');
+        part.style.transform = '';
+      }
+      part.addEventListener('pointercancel', reset);
+      part.addEventListener('lostpointercapture', reset);
+      part.addEventListener('pointerup', event => {
+        if (active !== part || event.button !== 0) return;
+        const box = slot.getBoundingClientRect();
+        const tolerance = LEVELS[level].tolerance;
+        // Overlapping generous hit areas still belong to the nearest silhouette.
+        const distance = rect => Math.hypot(event.clientX - rect.x - rect.width / 2, event.clientY - rect.y - rect.height / 2);
+        const nearest = [...monster.querySelectorAll('.slot')].every(other => distance(box) <= distance(other.getBoundingClientRect()));
+        const matches = nearest && event.clientX >= box.left - tolerance && event.clientX <= box.right + tolerance && event.clientY >= box.top - tolerance && event.clientY <= box.bottom + tolerance;
+        reset();
+        if (!matches) { Juegos.sound.oops(); return; }
+        part.classList.add('placed');
+        slot.classList.add('filled');
+        Juegos.sound.star();
+        Juegos.burst(box.x + box.width / 2, box.y + box.height / 2);
+        placed++;
+        successes++;
+        progress.set(successes);
+        if (placed === LEVELS[level].slots) monster.classList.add('dancing');
+        if (successes === 10) finishLevel();
+        else if (placed === LEVELS[level].slots) {
+          playing = false;
+          setTimeout(() => { newMonster(); playing = true; }, 750);
+        }
+      });
+    }
+    async function finishLevel() {
+      playing = false;
+      const last = level === LEVELS.length - 1;
+      medals.add(last ? '🏆' : '🏅');
+      await Juegos.celebrate(last ? '🏆' : '🎉');
+      level = Math.min(level + 1, LEVELS.length - 1);
+      startLevel();
+    }
+    function startLevel() {
+      successes = 0;
+      progress.set(0);
+      newMonster();
+      playing = true;
+    }
+    Juegos.startScreen('👾').then(startLevel);
+  </script>
+</body>
+</html>
