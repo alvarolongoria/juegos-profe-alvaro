@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aplasta Topos</title>
+    <link rel="stylesheet" href="../assets/common.css" />
+    <style>
+      body {
+        background: linear-gradient(#7dd3fc 0 34%, #bef264 34%, #65a30d);
+      }
+
+      .cloud {
+        position: absolute;
+        height: 34px;
+        border-radius: 20px;
+        background: #fff;
+        animation: drift 50s linear infinite;
+      }
+
+      .cloud::before {
+        content: "";
+        position: absolute;
+        left: 22px;
+        top: -22px;
+        width: 50px;
+        height: 46px;
+        border-radius: 50%;
+        background: #fff;
+      }
+
+      .flower {
+        position: absolute;
+        font-size: 34px;
+      }
+
+      .hole {
+        position: absolute;
+        width: 210px;
+        height: 210px;
+        transform: translateX(-50%);
+      }
+
+      /* The pit clips the mole so it seems to climb out of the ground. */
+      .pit {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        bottom: 34px;
+        overflow: hidden;
+        border-radius: 0 0 50% 50% / 0 0 34px 34px;
+      }
+
+      .hole::before {
+        content: "";
+        position: absolute;
+        left: 6px;
+        right: 6px;
+        bottom: 6px;
+        height: 64px;
+        border-radius: 50%;
+        background: radial-gradient(#1c0f05 55%, #422006);
+      }
+
+      .hole::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 40px;
+        border-radius: 0 0 50% 50%;
+        border-bottom: 14px solid #854d0e;
+        pointer-events: none;
+      }
+
+      .mole {
+        position: absolute;
+        left: 25px;
+        bottom: 0;
+        width: 160px;
+        height: 160px;
+        transform: translateY(100%);
+        transition: transform 0.18s ease-out;
+      }
+
+      .mole[data-up="1"] {
+        transform: translateY(0);
+      }
+
+      .mole svg {
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      .mole .face-hit,
+      .mole.hit .face-ok {
+        display: none;
+      }
+
+      .mole.hit .face-hit {
+        display: inline;
+      }
+
+      .mole.hit svg {
+        animation: squash 0.3s ease-out;
+        transform-origin: 50% 100%;
+      }
+
+      .start-mole {
+        width: 220px;
+        height: 220px;
+      }
+
+      @keyframes drift { from { transform: translateX(110vw); } to { transform: translateX(-200px); } }
+      @keyframes squash { 40% { transform: scale(1.15, 0.8); } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .cloud, .mole.hit svg { animation: none; }
+        .mole { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="cloud" style="top: 130px; width: 110px; animation-delay: -10s" aria-hidden="true"></div>
+    <div class="cloud" style="top: 190px; width: 80px; animation-delay: -32s" aria-hidden="true"></div>
+    <script src="../assets/common.js"></script>
+    <script>
+      // Each level: how long a mole stays up (ms), moles at once, pause between moles (ms).
+      const LEVELS = [
+        { show: 2600, max: 1, gap: 600 },
+        { show: 2000, max: 1, gap: 450 },
+        { show: 1500, max: 2, gap: 350 },
+        { show: 1200, max: 2, gap: 250 },
+      ];
+      const HITS_PER_LEVEL = 10;
+      const SPOTS = [
+        [22, 210], [50, 210], [78, 210],
+        [22, 450], [50, 450], [78, 450],
+      ];
+
+      function moleSvg() {
+        return `<svg viewBox="0 0 160 160" aria-hidden="true">
+          <path d="M14 160 V78 Q14 10 80 10 Q146 10 146 78 V160Z" fill="#a16207" stroke="#422006" stroke-width="5" />
+          <ellipse cx="80" cy="100" rx="40" ry="30" fill="#fde68a" />
+          <ellipse cx="80" cy="82" rx="14" ry="10" fill="#f472b6" stroke="#422006" stroke-width="3" />
+          <rect x="72" y="104" width="8" height="12" rx="2" fill="#fff" stroke="#422006" stroke-width="2" />
+          <rect x="80" y="104" width="8" height="12" rx="2" fill="#fff" stroke="#422006" stroke-width="2" />
+          <g class="face-ok">
+            <circle cx="56" cy="56" r="9" fill="#1c0f05" /><circle cx="104" cy="56" r="9" fill="#1c0f05" />
+            <circle cx="59" cy="53" r="3" fill="#fff" /><circle cx="107" cy="53" r="3" fill="#fff" />
+          </g>
+          <g class="face-hit" stroke="#1c0f05" stroke-width="5" stroke-linecap="round">
+            <path d="M48 48 L64 64 M64 48 L48 64 M96 48 L112 64 M112 48 L96 64" />
+            <text x="80" y="20" font-size="30" text-anchor="middle" stroke="none">💫</text>
+          </g>
+        </svg>`;
+      }
+
+      for (const [left, top] of [[8, 330], [36, 640], [64, 360], [93, 620], [50, 700]]) {
+        const f = Object.assign(document.createElement("div"), { className: "flower", textContent: "🌼" });
+        f.setAttribute("aria-hidden", "true");
+        f.style.left = `${left}%`;
+        f.style.top = `${top}px`;
+        document.body.append(f);
+      }
+
+      const moles = SPOTS.map(([left, top]) => {
+        const hole = document.createElement("div");
+        hole.className = "hole";
+        hole.style.left = `${left}%`;
+        hole.style.top = `${top}px`;
+        const pit = document.createElement("div");
+        pit.className = "pit";
+        const el = document.createElement("div");
+        el.className = "mole";
+        el.dataset.up = "0";
+        el.setAttribute("aria-label", "Topo");
+        el.innerHTML = moleSvg();
+        pit.append(el);
+        hole.append(pit);
+        document.body.append(hole);
+        const mole = { el, timer: null };
+        // Only the left ("green") button whacks a mole.
+        el.addEventListener("pointerdown", (e) => {
+          if (e.button === 0) whack(mole);
+        });
+        return mole;
+      });
+
+      const progress = Juegos.progress(HITS_PER_LEVEL);
+      const medals = Juegos.medals();
+      Juegos.homeButton();
+      Juegos.guardRightClick();
+
+      let level = 0;
+      let hits = 0;
+      let playing = false;
+      let spawnTimer = null;
+
+      function hide(mole) {
+        clearTimeout(mole.timer);
+        mole.el.dataset.up = "0";
+        setTimeout(() => mole.el.classList.remove("hit"), 200);
+      }
+
+      function popUp() {
+        if (!playing) return;
+        const cfg = LEVELS[level];
+        const up = moles.filter((m) => m.el.dataset.up === "1");
+        const down = moles.filter((m) => m.el.dataset.up === "0" && !m.el.classList.contains("hit"));
+        if (up.length < cfg.max && down.length) {
+          const mole = Juegos.pick(down);
+          mole.el.dataset.up = "1";
+          // Hiding again is never a penalty: another mole just comes out.
+          mole.timer = setTimeout(() => hide(mole), cfg.show);
+        }
+        spawnTimer = setTimeout(popUp, cfg.gap + Math.random() * cfg.gap);
+      }
+
+      function whack(mole) {
+        if (!playing || mole.el.dataset.up !== "1" || mole.el.classList.contains("hit")) return;
+        clearTimeout(mole.timer);
+        mole.el.classList.add("hit");
+        Juegos.sound.pop();
+        const box = mole.el.getBoundingClientRect();
+        Juegos.burst(box.x + box.width / 2, box.y + 40, "⭐", 8);
+        hits++;
+        progress.set(hits);
+        setTimeout(() => hide(mole), 450);
+        if (hits >= HITS_PER_LEVEL) finishLevel();
+      }
+
+      async function finishLevel() {
+        playing = false;
+        clearTimeout(spawnTimer);
+        setTimeout(() => moles.forEach(hide), 500);
+        const last = level === LEVELS.length - 1;
+        medals.add(last ? "🏆" : "🏅");
+        await Juegos.celebrate(last ? "🏆" : "🎉");
+        level = Math.min(level + 1, LEVELS.length - 1);
+        startLevel();
+      }
+
+      function startLevel() {
+        hits = 0;
+        progress.set(0);
+        document.body.dataset.show = String(LEVELS[level].show);
+        document.body.dataset.max = String(LEVELS[level].max);
+        playing = true;
+        popUp();
+      }
+
+      document.body.dataset.show = String(LEVELS[0].show);
+      document.body.dataset.max = String(LEVELS[0].max);
+      const startArt = document.createElement("div");
+      startArt.className = "start-mole";
+      startArt.innerHTML = moleSvg();
+      Juegos.startScreen(startArt).then(startLevel);
+    </script>
+  </body>
+</html>
