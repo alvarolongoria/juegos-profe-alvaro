@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Piano de letras</title>
+    <link rel="stylesheet" href="../assets/common.css" />
+    <style>
+      body { background: linear-gradient(#ddd6fe, #f0f9ff 75%, #bae6fd); }
+      main { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px; padding: 105px 12px 20px; }
+      #target { display: grid; place-items: center; width: 170px; height: 170px; font-size: 110px; background: white; border: 5px solid #8b5cf6; border-radius: 28px; box-shadow: 0 12px 0 #a78bfa; }
+      #keyboard { width: min(940px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 20px 12px; border-radius: 24px; background: #c4b5fd; }
+      .row { display: flex; justify-content: center; gap: 8px; }
+      .key { display: grid; place-items: center; width: clamp(22px, 6vw, 72px); height: clamp(40px, 8vh, 65px); border: 2px solid #a1a1aa; border-radius: 10px; box-shadow: 0 5px 0 #71717a; background: #fff; color: #27272a; font-size: clamp(18px, 3vw, 34px); }
+      .key.target { background: #fef08a; border-color: #ca8a04; box-shadow: 0 5px 0 #a16207, 0 0 20px #facc15; animation: glow 1.5s ease-in-out infinite; }
+      .key.wrong { background: #bfdbfe; border-color: #60a5fa; }
+      @keyframes glow { 50% { transform: translateY(-3px); } }
+      @media (max-height: 650px) { main { gap: 18px; } #target { width: 110px; height: 110px; font-size: 76px; } #keyboard { gap: 8px; padding: 12px; } }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+        .particle, .confetti, .wrong-button-hint { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <main aria-label="Piano de letras">
+      <div id="target" aria-label="Tecla que debes pulsar" aria-live="polite"></div>
+      <div id="keyboard" aria-label="Teclado español"></div>
+    </main>
+    <script src="../assets/common.js"></script>
+    <script>
+      const LEVELS = ["AEIOU", "MPLST", "ÑABCDEFGHIJKLMNOPQRSTUVWXYZ", "123456789"];
+      const ROWS = ["1234567890", "QWERTYUIOP", "ASDFGHJKLÑ", "ZXCVBNM"];
+      const PITCHES = "ABCDEFGHIJKLMNOPQRSTUVWXYZÑ1234567890";
+      const progress = Juegos.progress(10);
+      const medals = Juegos.medals();
+      const target = document.getElementById("target");
+      const keys = new Map();
+      const flashTimers = new Map();
+      let level = 0;
+      let successes = 0;
+      let position = 0;
+      let playing = false;
+      let pianoAudio = null;
+      Juegos.homeButton();
+      Juegos.guardRightClick();
+
+      // Local sound extension: the shared sound API has no pitched piano note.
+      // Keep all game sound calls on Juegos.sound without changing shared files.
+      Juegos.sound.piano = function (key) {
+        const Audio = window.AudioContext || window.webkitAudioContext;
+        if (!Audio) return;
+        if (!pianoAudio) pianoAudio = new Audio();
+        if (pianoAudio.state === "suspended") pianoAudio.resume();
+        const now = pianoAudio.currentTime;
+        const frequency = 220 * Math.pow(2, PITCHES.indexOf(key) / 12);
+        [1, 2, 3].forEach((harmonic, index) => {
+          const oscillator = pianoAudio.createOscillator();
+          const gain = pianoAudio.createGain();
+          oscillator.frequency.value = frequency * harmonic;
+          gain.gain.setValueAtTime(0.0001, now);
+          gain.gain.exponentialRampToValueAtTime(0.18 / (index + 1), now + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.65);
+          oscillator.connect(gain).connect(pianoAudio.destination);
+          oscillator.start(now);
+          oscillator.stop(now + 0.7);
+        });
+      };
+
+      for (const row of ROWS) {
+        const container = document.createElement("div");
+        container.className = "row";
+        for (const key of row) {
+          const cap = document.createElement("div");
+          cap.className = "key";
+          cap.dataset.key = key;
+          cap.textContent = key;
+          keys.set(key, cap);
+          container.appendChild(cap);
+        }
+        document.getElementById("keyboard").appendChild(container);
+      }
+
+      function showTarget() {
+        const character = LEVELS[level][position % LEVELS[level].length];
+        target.textContent = character;
+        for (const [key, cap] of keys) cap.classList.toggle("target", key === character);
+      }
+
+      function startLevel() {
+        successes = 0;
+        position = 0;
+        progress.set(0);
+        showTarget();
+        playing = true;
+      }
+
+      async function finishLevel() {
+        playing = false;
+        const last = level === LEVELS.length - 1;
+        medals.add(last ? "🏆" : "🏅");
+        await Juegos.celebrate(last ? "🏆" : "🎉");
+        level = Math.min(level + 1, LEVELS.length - 1);
+        startLevel();
+      }
+
+      window.addEventListener("keydown", (event) => {
+        if (!playing || event.repeat || ["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock", "Fn"].includes(event.key)) return;
+        // Preserve browser shortcuts; plain letter input is case-insensitive.
+        if (event.ctrlKey || event.altKey || event.metaKey) return;
+        event.preventDefault();
+        const key = event.key.toUpperCase();
+        if (key !== target.textContent) {
+          Juegos.sound.oops();
+          const cap = keys.get(key);
+          if (cap) {
+            cap.classList.add("wrong");
+            clearTimeout(flashTimers.get(key));
+            flashTimers.set(key, setTimeout(() => {
+              cap.classList.remove("wrong");
+              flashTimers.delete(key);
+            }, 450));
+          }
+          return;
+        }
+        Juegos.sound.piano(key);
+        const box = target.getBoundingClientRect();
+        Juegos.burst(box.x + box.width / 2, box.y + box.height / 2, "⭐");
+        successes++;
+        progress.set(successes);
+        if (successes === 10) finishLevel();
+        else {
+          // After the first Ñ, every letter can be drawn, without immediate repeats.
+          if (level === 2) position = (position + 1 + Math.floor(Math.random() * (LEVELS[level].length - 1))) % LEVELS[level].length;
+          else position++;
+          showTarget();
+        }
+      });
+      Juegos.startScreen("🎹").then(startLevel);
+    </script>
+  </body>
+</html>
