@@ -1,0 +1,11 @@
+{
+  "name": "juegos-profe-alvaro",
+  "private": true,
+  "description": "Ad-free mouse and keyboard games for 1st grade (TID).",
+  "scripts": {
+    "test": "for t in tests/test-*.js; do echo \"== $t\"; node \"$t\" || exit 1; done"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1"
+  }
+}

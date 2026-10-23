@@ -1,0 +1,228 @@
+/* Shared styles for every game: big pointer, home button, progress, overlays. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A big white arrow so 6-year-olds always see where the "tip" is. */
+body {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 24 24'><path d='M3 2l16 9-7 2-3 7z' fill='white' stroke='black' stroke-width='1.6' stroke-linejoin='round'/></svg>") 6 4, auto;
+}
+
+body * {
+  cursor: inherit;
+}
+
+img {
+  -webkit-user-drag: none;
+}
+
+/* Home button: always top-left, always the same. */
+.home-btn {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 50;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 44px;
+  text-decoration: none;
+  transition: transform 0.15s;
+}
+
+.home-btn:hover {
+  transform: scale(1.12);
+}
+
+/* Progress: a row of stars that fill up. */
+.progress {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 40px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.progress span {
+  font-size: 34px;
+  filter: grayscale(1) opacity(0.3);
+  transition: filter 0.3s, transform 0.3s;
+}
+
+.progress span.on {
+  filter: none;
+  transform: scale(1.15);
+}
+
+/* Medals won so far (one per finished level). */
+.medals {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 40;
+  font-size: 40px;
+  min-height: 56px;
+  padding: 4px 12px;
+  border-radius: 40px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.medals:empty {
+  display: none;
+}
+
+/* Full-screen overlay used for "start" and "well done" screens. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.overlay .big-emoji {
+  font-size: 160px;
+  line-height: 1;
+  animation: bounce 1s ease-in-out infinite;
+}
+
+.play-btn {
+  width: 200px;
+  height: 200px;
+  border: none;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 10px 0 #15803d;
+  color: #fff;
+  font-size: 110px;
+  line-height: 1;
+  padding: 0 0 0 18px;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.play-btn:hover {
+  background: #16a34a;
+}
+
+.play-btn:active {
+  transform: translateY(6px);
+  box-shadow: 0 4px 0 #15803d;
+}
+
+/* A soap bubble drawn with CSS (the bubble emoji is missing on Windows 10). */
+.bubble-look {
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ffffffee 0 12%, #bae6fdaa 35%, #38bdf855 70%, #0ea5e988 100%);
+  border: 3px solid #ffffffcc;
+  box-shadow: inset -8px -8px 20px #0284c744;
+}
+
+.bubble-icon {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+}
+
+/* Confetti and small particles. */
+.particle {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  font-size: 28px;
+  animation: fly 0.9s ease-out forwards;
+}
+
+.confetti {
+  position: fixed;
+  z-index: 110;
+  pointer-events: none;
+  width: 14px;
+  height: 20px;
+  border-radius: 3px;
+  animation: fly 1.4s ease-out forwards;
+}
+
+/* Hint shown when the child presses the wrong (right) mouse button. */
+.wrong-button-hint {
+  position: fixed;
+  z-index: 95;
+  pointer-events: none;
+  font-size: 64px;
+  transform: translate(-50%, -120%);
+  animation: fade-up 1.2s ease-out forwards;
+}
+
+@keyframes fly {
+  from {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 1;
+  }
+  to {
+    transform: translate(var(--dx), var(--dy)) rotate(var(--rot, 0deg));
+    opacity: 0;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    margin-top: -40px;
+  }
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    scale: 1;
+  }
+  50% {
+    scale: 1.08;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay .big-emoji,
+  .play-btn {
+    animation: none;
+  }
+}

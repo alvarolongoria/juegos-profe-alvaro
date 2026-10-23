@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Juegos del profe Álvaro</title>
+    <link rel="stylesheet" href="assets/common.css" />
+    <style>
+      body {
+        background: linear-gradient(135deg, #fde68a, #fbcfe8 50%, #bfdbfe);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        overflow-y: auto;
+      }
+
+      h1 {
+        margin: 32px 16px 8px;
+        font-size: clamp(32px, 5vw, 56px);
+        color: #1e3a8a;
+        text-align: center;
+        text-shadow: 3px 3px 0 #fff;
+      }
+
+      .games {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 32px;
+        width: min(1200px, 92vw);
+        padding: 32px 0 48px;
+      }
+
+      .card {
+        aspect-ratio: 1;
+        border-radius: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 120px;
+        text-decoration: none;
+        box-shadow: 0 12px 0 rgba(0, 0, 0, 0.15);
+        transition: transform 0.15s;
+      }
+
+      a.card:hover {
+        transform: scale(1.08) rotate(-2deg);
+      }
+
+      a.card:active {
+        transform: scale(1.02) translateY(6px);
+      }
+
+      .card.soon {
+        filter: grayscale(1) opacity(0.45);
+        position: relative;
+      }
+
+      .card.soon::after {
+        content: "🔒";
+        position: absolute;
+        right: 18px;
+        bottom: 12px;
+        font-size: 48px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🎮 Juegos del profe Álvaro</h1>
+    <main class="games">
+      <!-- Ready games are links; upcoming ones are locked cards. -->
+      <div class="card soon" style="background: #fef08a" aria-label="Enciende las estrellas (pronto)">🌟</div>
+      <a class="card" href="juegos/burbujas.html" style="background: #bae6fd" aria-label="Cazaburbujas"><span class="bubble-look bubble-icon"></span></a>
+      <div class="card soon" style="background: #ddd6fe" aria-label="Fábrica de monstruos (pronto)">👾</div>
+      <div class="card soon" style="background: #fecaca" aria-label="Cohete saltarín (pronto)">🚀</div>
+      <div class="card soon" style="background: #bbf7d0" aria-label="Piano de letras (pronto)">🎹</div>
+    </main>
+    <script src="assets/common.js"></script>
+    <script>
+      Juegos.guardRightClick();
+    </script>
+  </body>
+</html>
