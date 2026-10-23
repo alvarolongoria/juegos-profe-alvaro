@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cohete saltarín</title>
+    <link rel="stylesheet" href="../assets/common.css" />
+    <style>
+      body { background: linear-gradient(#172554, #4338ca 75%, #818cf8); }
+      #world { position: fixed; inset: 110px 0 130px; overflow: hidden; }
+      #land { position: absolute; bottom: 0; width: 100%; height: 24px; background: repeating-linear-gradient(90deg, #a5b4fc 0 45px, #6366f1 45px 90px); border-top: 5px solid #e0e7ff; }
+      #pad { position: absolute; bottom: 24px; left: 95px; width: 130px; height: 15px; border-radius: 10px; background: #cbd5e1; }
+      #rocket { position: absolute; width: 86px; height: 86px; font-size: 72px; line-height: 86px; text-align: center; left: 120px; bottom: 35px; }
+      .star { position: absolute; width: 60px; height: 60px; font-size: 52px; line-height: 60px; text-align: center; }
+      .key { position: fixed; bottom: 24px; height: 85px; background: #fff; color: #1e293b; border: 5px solid #cbd5e1; border-radius: 18px; box-shadow: 0 8px #64748b; display: flex; justify-content: center; align-items: center; font-size: 32px; font-weight: bold; }
+      #enter-key { left: calc(50% - 250px); width: 180px; }
+      #space-key { left: calc(50% - 35px); width: 300px; }
+      #space-key::after { content: ''; width: 75%; height: 15px; border: solid #475569; border-width: 0 4px 4px; }
+      .key.active, .key.hint { animation: pulse 1s ease-in-out infinite; border-color: #facc15; }
+      .key.lit, .key.hint { background: #fef08a; }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::after { animation: none !important; transition: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="world" data-state="start" data-missed="0" aria-label="Cielo del cohete">
+      <div id="land"></div><div id="pad"></div>
+      <div id="rocket" data-height="0" data-hops="0" aria-label="Cohete">🚀</div>
+    </div>
+    <div id="enter-key" class="key" aria-label="Tecla Enter">ENTER</div>
+    <div id="space-key" class="key" aria-label="Barra espaciadora"></div>
+    <script src="../assets/common.js"></script>
+    <script>
+      const LEVELS = [
+        { speed: 230, heights: [95] },
+        { speed: 230, heights: [150] },
+        { speed: 280, heights: [150] },
+        { speed: 310, heights: [95, 160, 120, 150] },
+      ];
+      const world = document.querySelector('#world');
+      const rocket = document.querySelector('#rocket');
+      const land = document.querySelector('#land');
+      const pad = document.querySelector('#pad');
+      const enterKey = document.querySelector('#enter-key');
+      const spaceKey = document.querySelector('#space-key');
+      const progress = Juegos.progress(10);
+      const medals = Juegos.medals();
+      Juegos.homeButton();
+      Juegos.guardRightClick();
+      let level = 0, successes = 0, sequence = 0, height = 0, velocity = 0;
+      let star = null, distance = 0, lastTime = 0;
+      const flashTimers = new Map();
+
+      // Local helper: keycap feedback also remains visible with reduced motion.
+      function flash(key, className) {
+        const id = key.id + className;
+        clearTimeout(flashTimers.get(id));
+        key.classList.add(className);
+        flashTimers.set(id, setTimeout(() => key.classList.remove(className), 600));
+      }
+      function state(value) {
+        world.dataset.state = value;
+        enterKey.classList.toggle('active', value === 'ready');
+        spaceKey.classList.toggle('active', value === 'flying');
+      }
+      function spawn() {
+        const cfg = LEVELS[level];
+        const elevation = cfg.heights[sequence++ % cfg.heights.length];
+        const el = document.createElement('div');
+        el.className = 'star';
+        el.textContent = '⭐';
+        el.setAttribute('aria-label', 'Estrella');
+        el.dataset.height = elevation;
+        world.appendChild(el);
+        star = { el, x: Math.min(world.clientWidth - 45, 463), height: elevation };
+        placeStar();
+      }
+      function placeStar() {
+        star.el.style.left = `${star.x - 30}px`;
+        star.el.style.bottom = `${35 + 43 + star.height - 30}px`;
+      }
+      function startLevel() {
+        successes = 0;
+        sequence = 0;
+        height = velocity = 0;
+        world.dataset.missed = '0';
+        rocket.dataset.height = '0';
+        rocket.style.transform = '';
+        pad.hidden = false;
+        progress.set(0);
+        state('ready');
+      }
+      async function finishLevel() {
+        state('celebrating');
+        const last = level === LEVELS.length - 1;
+        medals.add(last ? '🏆' : '🏅');
+        await Juegos.celebrate(last ? '🏆' : '🎉');
+        level = Math.min(level + 1, LEVELS.length - 1);
+        startLevel();
+      }
+      window.addEventListener('keydown', e => {
+        if (e.code === 'Space' || e.key === 'Enter') e.preventDefault();
+        if (e.repeat || !['ready', 'flying'].includes(world.dataset.state)) return;
+        if (world.dataset.state === 'ready' && e.key === 'Enter') {
+          state('flying');
+          pad.hidden = true;
+          Juegos.sound.click();
+          spawn();
+        } else if (world.dataset.state === 'flying' && e.code === 'Space') {
+          velocity = 480;
+          rocket.dataset.hops = Number(rocket.dataset.hops) + 1;
+          flash(spaceKey, 'lit');
+          Juegos.sound.click();
+        } else {
+          Juegos.sound.oops();
+          flash(world.dataset.state === 'ready' ? enterKey : spaceKey, 'hint');
+        }
+      });
+      function loop(time) {
+        const dt = Math.min((time - lastTime) / 1000, 0.04);
+        lastTime = time;
+        if (world.dataset.state === 'flying') {
+          const cfg = LEVELS[level];
+          velocity -= 700 * dt;
+          height = Math.min(Math.max(0, world.clientHeight - 170), Math.max(0, height + velocity * dt));
+          if (height === 0 && velocity < 0) velocity = 0;
+          rocket.style.transform = `translateY(${-height}px)`;
+          rocket.dataset.height = height;
+          distance += cfg.speed * dt;
+          land.style.backgroundPositionX = `${-distance}px`;
+          star.x -= cfg.speed * dt;
+          placeStar();
+          // Generous circular collision, but ground flight never reaches a star.
+          if (Math.hypot(star.x - 163, star.height - height) < 55) {
+            const box = star.el.getBoundingClientRect();
+            Juegos.sound.star();
+            Juegos.burst(box.x + 30, box.y + 30, '✨');
+            star.el.remove();
+            star = null;
+            progress.set(++successes);
+            if (successes === 10) finishLevel();
+            else spawn();
+          } else if (star.x < -40) {
+            star.el.remove();
+            world.dataset.missed = Number(world.dataset.missed) + 1;
+            spawn();
+          }
+        }
+        requestAnimationFrame(loop);
+      }
+      Juegos.startScreen('🚀').then(startLevel);
+      requestAnimationFrame(t => { lastTime = t; loop(t); });
+    </script>
+  </body>
+</html>
