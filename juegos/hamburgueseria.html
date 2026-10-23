@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>La Hamburguesería</title>
+    <link rel="stylesheet" href="../assets/common.css" />
+    <style>
+      body {
+        background: repeating-linear-gradient(90deg, #5eead4 0 34px, #2dd4bf 34px 68px);
+      }
+
+      .counter {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 300px;
+        background: linear-gradient(#ef4444 0 34px, #b91c1c 34px 44px, #94a3b8 44px);
+      }
+
+      /* ---------- Customer and order bubble ---------- */
+      .customer {
+        position: fixed;
+        left: 6%;
+        top: 178px;
+        width: 220px;
+        height: 290px;
+        animation: idle 2.4s ease-in-out infinite;
+      }
+
+      .customer svg {
+        width: 100%;
+        height: 100%;
+      }
+
+      .customer[data-ready="0"] {
+        opacity: 0.4;
+      }
+
+      .customer .mouth-happy,
+      .customer.happy .mouth-calm {
+        display: none;
+      }
+
+      .customer.happy .mouth-happy {
+        display: inline;
+      }
+
+      .customer.happy {
+        animation: cheer 0.6s ease-out 2;
+      }
+
+      .order {
+        position: fixed;
+        left: calc(6% + 240px);
+        top: 140px;
+        width: 250px;
+        min-height: 250px;
+        padding: 22px;
+        border-radius: 40px;
+        background: #fff;
+        box-shadow: 0 8px 0 #0f766e55;
+        display: flex;
+        flex-direction: column-reverse;
+        justify-content: flex-start;
+        align-items: center;
+      }
+
+      .order::before {
+        content: "";
+        position: absolute;
+        left: -26px;
+        top: 70px;
+        border: 16px solid transparent;
+        border-right: 26px solid #fff;
+      }
+
+      .order .layer {
+        width: 150px;
+        line-height: 0;
+        transition: opacity 0.3s;
+      }
+
+      .order .layer.done {
+        opacity: 0.25;
+      }
+
+      .order .layer.next {
+        animation: beckon 1s ease-in-out infinite;
+        filter: drop-shadow(0 0 8px #facc15);
+      }
+
+      /* ---------- Plate ---------- */
+      .plate {
+        position: fixed;
+        left: 62%;
+        bottom: 236px;
+        width: 300px;
+        height: 330px;
+        display: flex;
+        flex-direction: column-reverse;
+        align-items: center;
+        padding-bottom: 34px;
+        background: radial-gradient(ellipse 150px 26px at 50% calc(100% - 20px), #f8fafc 96%, transparent) no-repeat,
+          radial-gradient(ellipse 160px 32px at 50% calc(100% - 14px), #cbd5e1 96%, transparent) no-repeat;
+      }
+
+      .plate .layer {
+        width: 220px;
+        line-height: 0;
+        margin-top: -6px;
+        animation: drop 0.25s ease-in;
+      }
+
+      /* ---------- Ingredient tray ---------- */
+      .tray {
+        position: fixed;
+        left: 50%;
+        bottom: 26px;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 16px;
+        padding: 16px 22px;
+        border-radius: 30px;
+        background: #e2e8f0;
+        box-shadow: inset 0 6px 0 #94a3b8, 0 8px 0 #475569;
+      }
+
+      .ingredient {
+        position: relative;
+        width: 150px;
+        height: 130px;
+        border: none;
+        border-radius: 24px;
+        background: #fff;
+        box-shadow: 0 7px 0 #64748b;
+        display: grid;
+        place-items: center;
+        padding: 10px;
+        touch-action: none;
+        transition: transform 0.12s;
+      }
+
+      .ingredient svg {
+        width: 120px;
+        pointer-events: none;
+      }
+
+      .ingredient:hover {
+        transform: translateY(-5px) scale(1.05);
+      }
+
+      .ingredient.no {
+        background: #fecaca;
+        box-shadow: 0 7px 0 #dc2626;
+        animation: shake 0.45s ease-in-out;
+      }
+
+      .ingredient.hint {
+        background: #bbf7d0;
+        box-shadow: 0 7px 0 #16a34a;
+        animation: beckon 0.8s ease-in-out infinite;
+      }
+
+      .ingredient.drag-hint::after {
+        content: "✋";
+        position: absolute;
+        top: -30px;
+        right: -10px;
+        font-size: 50px;
+        animation: slide-up 1s ease-in-out infinite;
+      }
+
+      .drag-ghost {
+        position: fixed;
+        z-index: 60;
+        width: 190px;
+        pointer-events: none;
+        transform: translate(-50%, -50%) scale(1.1);
+        filter: drop-shadow(0 10px 6px #0004);
+      }
+
+      .flash-ok {
+        position: fixed;
+        z-index: 45;
+        font-size: 60px;
+        pointer-events: none;
+        animation: rise 0.9s ease-out forwards;
+      }
+
+      .start-burger {
+        display: flex;
+        flex-direction: column-reverse;
+        align-items: center;
+        width: 260px;
+      }
+
+      .start-burger svg {
+        width: 260px;
+        margin-top: -8px;
+      }
+
+      @keyframes idle { 50% { transform: translateY(-8px); } }
+      @keyframes cheer { 40% { transform: translateY(-30px) rotate(-4deg); } }
+      @keyframes beckon { 50% { transform: scale(1.1); } }
+      @keyframes shake { 20%, 60% { transform: translateX(-10px); } 40%, 80% { transform: translateX(10px); } }
+      @keyframes drop { from { transform: translateY(-60px); opacity: 0; } }
+      @keyframes rise { to { transform: translateY(-110px) scale(1.4); opacity: 0; } }
+      @keyframes slide-up { 50% { transform: translate(30px, -30px); } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .customer, .customer.happy, .order .layer.next, .ingredient.hint, .plate .layer, .ingredient.drag-hint::after { animation: none; }
+        .flash-ok { animation-duration: 0.01ms; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="counter" aria-hidden="true"></div>
+    <div class="customer" data-ready="0" aria-label="Cliente"></div>
+    <div class="order" aria-label="Pedido del cliente"></div>
+    <div class="plate" aria-label="Plato"></div>
+    <div class="tray" aria-label="Ingredientes"></div>
+    <script src="../assets/common.js"></script>
+    <script>
+      // ---------- Drawings (inline SVG, no image files) ----------
+      const INGREDIENTS = {
+        "pan-abajo": { label: "Pan de abajo", h: 40, svg: '<path d="M10 4 H190 Q194 36 160 38 H40 Q6 36 10 4Z" fill="#f59e0b" stroke="#92400e" stroke-width="4"/>' },
+        carne: { label: "Carne", h: 34, svg: '<rect x="8" y="4" width="184" height="26" rx="13" fill="#78350f" stroke="#451a03" stroke-width="4"/><path d="M30 14 h20 M80 20 h24 M140 13 h22" stroke="#a16207" stroke-width="4" stroke-linecap="round"/>' },
+        queso: { label: "Queso", h: 34, svg: '<path d="M6 4 H194 L182 14 L170 30 L156 14 L60 14 L44 28 L32 14 Z" fill="#facc15" stroke="#ca8a04" stroke-width="4" stroke-linejoin="round"/>' },
+        tomate: { label: "Tomate", h: 26, svg: '<rect x="18" y="4" width="78" height="18" rx="9" fill="#ef4444" stroke="#991b1b" stroke-width="4"/><rect x="104" y="4" width="78" height="18" rx="9" fill="#ef4444" stroke="#991b1b" stroke-width="4"/>' },
+        lechuga: { label: "Lechuga", h: 28, svg: '<path d="M4 14 Q20 0 36 14 T68 14 T100 14 T132 14 T164 14 T196 14 L196 22 Q100 30 4 22Z" fill="#4ade80" stroke="#15803d" stroke-width="4" stroke-linejoin="round"/>' },
+        "pan-arriba": {
+          label: "Pan de arriba",
+          h: 70,
+          svg: '<path d="M8 64 Q8 6 100 6 Q192 6 192 64Z" fill="#f59e0b" stroke="#92400e" stroke-width="4"/><g fill="#fef3c7"><ellipse cx="60" cy="30" rx="6" ry="3"/><ellipse cx="100" cy="20" rx="6" ry="3"/><ellipse cx="140" cy="32" rx="6" ry="3"/><ellipse cx="82" cy="44" rx="6" ry="3"/><ellipse cx="122" cy="48" rx="6" ry="3"/></g>',
+        },
+      };
+      const FILLINGS = ["carne", "queso", "tomate", "lechuga"];
+
+      function ingSvg(ing) {
+        const it = INGREDIENTS[ing];
+        return `<svg viewBox="0 0 200 ${it.h}" aria-hidden="true">${it.svg}</svg>`;
+      }
+
+      function layerEl(ing) {
+        const el = document.createElement("div");
+        el.className = "layer";
+        el.dataset.ing = ing;
+        el.innerHTML = ingSvg(ing);
+        return el;
+      }
+
+      const LOOKS = [
+        { hair: "#92400e", shirt: "#3b82f6", skin: "#fcd9b6" },
+        { hair: "#1f2937", shirt: "#ec4899", skin: "#c68642" },
+        { hair: "#f59e0b", shirt: "#22c55e", skin: "#ffe0bd" },
+        { hair: "#7c2d12", shirt: "#a855f7", skin: "#8d5524" },
+        { hair: "#111827", shirt: "#f97316", skin: "#f1c27d" },
+      ];
+
+      function customerSvg({ hair, shirt, skin }) {
+        return `<svg viewBox="0 0 220 290" aria-hidden="true">
+          <path d="M30 290 Q30 190 110 190 Q190 190 190 290Z" fill="${shirt}" stroke="#1e293b" stroke-width="5"/>
+          <circle cx="110" cy="110" r="78" fill="${skin}" stroke="#1e293b" stroke-width="5"/>
+          <path d="M34 100 Q40 24 110 26 Q182 24 186 100 Q160 60 110 62 Q60 60 34 100Z" fill="${hair}" stroke="#1e293b" stroke-width="5"/>
+          <circle cx="82" cy="112" r="10" fill="#1e293b"/><circle cx="138" cy="112" r="10" fill="#1e293b"/>
+          <circle cx="85" cy="108" r="3" fill="#fff"/><circle cx="141" cy="108" r="3" fill="#fff"/>
+          <circle cx="66" cy="140" r="9" fill="#f9a8d4"/><circle cx="154" cy="140" r="9" fill="#f9a8d4"/>
+          <path class="mouth-calm" d="M94 148 Q110 158 126 148" fill="none" stroke="#1e293b" stroke-width="5" stroke-linecap="round"/>
+          <path class="mouth-happy" d="M86 142 Q110 182 134 142Z" fill="#be123c" stroke="#1e293b" stroke-width="5" stroke-linejoin="round"/>
+        </svg>`;
+      }
+
+      // ---------- Game state ----------
+      const LEVELS = [3, 4, 5, 6]; // layers per burger; the last level is built by dragging
+      const DRAG_LEVEL = 3;
+      const BURGERS_PER_LEVEL = 5;
+
+      const customer = document.querySelector(".customer");
+      const orderBox = document.querySelector(".order");
+      const plate = document.querySelector(".plate");
+      const tray = document.querySelector(".tray");
+      const progress = Juegos.progress(BURGERS_PER_LEVEL);
+      const medals = Juegos.medals();
+      Juegos.homeButton();
+      Juegos.guardRightClick();
+
+      let level = 0;
+      let served = 0;
+      let wanted = [];
+      let placed = 0;
+      let lookIndex = 0;
+
+      const buttons = Object.keys(INGREDIENTS).map((ing) => {
+        const b = document.createElement("button");
+        b.className = "ingredient";
+        b.dataset.ing = ing;
+        b.setAttribute("aria-label", INGREDIENTS[ing].label);
+        b.innerHTML = ingSvg(ing);
+        b.addEventListener("click", () => {
+          if (level === DRAG_LEVEL) flashClass(b, "drag-hint", 1200);
+          else tryAdd(ing, b);
+        });
+        attachDrag(b, ing);
+        tray.append(b);
+        return b;
+      });
+
+      function flashClass(el, cls, ms) {
+        el.classList.remove(cls);
+        void el.offsetWidth;
+        el.classList.add(cls);
+        setTimeout(() => el.classList.remove(cls), ms);
+      }
+
+      function markNext() {
+        orderBox.querySelectorAll(".layer").forEach((el, i) => {
+          el.classList.toggle("done", i < placed);
+          el.classList.toggle("next", i === placed);
+        });
+      }
+
+      // Every sound has a visible twin, because classroom PCs often have no speakers.
+      function tryAdd(ing, button) {
+        if (customer.dataset.ready !== "1") return;
+        const next = wanted[placed];
+        if (ing !== next) {
+          Juegos.sound.oops();
+          flashClass(button, "no", 500);
+          tray.querySelector(`[data-ing="${next}"]`).classList.add("hint");
+          return;
+        }
+        buttons.forEach((b) => b.classList.remove("hint"));
+        plate.append(layerEl(ing));
+        placed++;
+        markNext();
+        Juegos.sound.star();
+        const box = plate.getBoundingClientRect();
+        const spark = Object.assign(document.createElement("div"), { className: "flash-ok", textContent: "✨" });
+        spark.style.left = `${box.x + box.width / 2 + 90}px`;
+        spark.style.top = `${box.bottom - 60 - placed * 30}px`;
+        document.body.append(spark);
+        setTimeout(() => spark.remove(), 900);
+        if (placed === wanted.length) serve();
+      }
+
+      function serve() {
+        customer.dataset.ready = "0";
+        customer.classList.add("happy");
+        const box = customer.getBoundingClientRect();
+        Juegos.burst(box.x + box.width / 2, box.y + 110, "❤️", 10);
+        Juegos.sound.win();
+        served++;
+        progress.set(served);
+        if (served >= BURGERS_PER_LEVEL) setTimeout(finishLevel, 900);
+        else setTimeout(newCustomer, 1300);
+      }
+
+      async function finishLevel() {
+        const last = level === LEVELS.length - 1;
+        medals.add(last ? "🏆" : "🏅");
+        await Juegos.celebrate(last ? "🏆" : "🎉");
+        level = Math.min(level + 1, LEVELS.length - 1);
+        startLevel();
+      }
+
+      function newCustomer() {
+        const fillings = [...FILLINGS].sort(() => Math.random() - 0.5).slice(0, LEVELS[level] - 2);
+        wanted = ["pan-abajo", ...fillings, "pan-arriba"];
+        placed = 0;
+        plate.replaceChildren();
+        buttons.forEach((b) => b.classList.remove("hint", "no", "drag-hint"));
+        customer.classList.remove("happy");
+        customer.innerHTML = customerSvg(LOOKS[lookIndex++ % LOOKS.length]);
+        orderBox.replaceChildren(...wanted.map(layerEl));
+        markNext();
+        setTimeout(() => (customer.dataset.ready = "1"), 300);
+      }
+
+      function startLevel() {
+        served = 0;
+        progress.set(0);
+        newCustomer();
+      }
+
+      // Last level: the ingredient has to travel to the plate with the button held.
+      function attachDrag(button, ing) {
+        let ghost = null;
+        button.addEventListener("pointerdown", (e) => {
+          if (level !== DRAG_LEVEL || e.button !== 0 || customer.dataset.ready !== "1") return;
+          button.setPointerCapture(e.pointerId);
+          ghost = document.createElement("div");
+          ghost.className = "drag-ghost";
+          ghost.innerHTML = ingSvg(ing);
+          ghost.style.left = `${e.clientX}px`;
+          ghost.style.top = `${e.clientY}px`;
+          document.body.append(ghost);
+        });
+        button.addEventListener("pointermove", (e) => {
+          if (!ghost) return;
+          ghost.style.left = `${e.clientX}px`;
+          ghost.style.top = `${e.clientY}px`;
+        });
+        const drop = (e) => {
+          if (!ghost) return;
+          ghost.remove();
+          ghost = null;
+          const box = plate.getBoundingClientRect();
+          const pad = 80;
+          const onPlate = e.clientX > box.left - pad && e.clientX < box.right + pad && e.clientY > box.top - pad && e.clientY < box.bottom + pad;
+          if (onPlate) tryAdd(ing, button);
+        };
+        button.addEventListener("pointerup", drop);
+        button.addEventListener("pointercancel", () => ghost && (ghost.remove(), (ghost = null)));
+      }
+
+      const startArt = document.createElement("div");
+      startArt.className = "start-burger";
+      startArt.innerHTML = Object.keys(INGREDIENTS).map(ingSvg).join("");
+      Juegos.startScreen(startArt).then(startLevel);
+    </script>
+  </body>
+</html>
