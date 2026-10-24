@@ -19,7 +19,8 @@
         height: 372px;
         margin-top: 104px;
         overflow: hidden;
-        background: linear-gradient(#38bdf8, #bae6fd 60%);
+        background: linear-gradient(#60d5f5, #d8f5ee);
+        border-top: 4px solid #24334b;
       }
 
       .hills {
@@ -28,7 +29,12 @@
         right: 0;
         top: 0;
         width: 100%;
-        height: 110px;
+        height: calc(100% - 268px);
+        pointer-events: none;
+      }
+
+      .cloud, .finish-line, .mascot-box, .start-art svg {
+        pointer-events: none;
       }
 
       .cloud {
@@ -61,8 +67,9 @@
           repeating-linear-gradient(90deg, #fde047 0 40px, transparent 40px 80px) 0 63px / 100% 4px no-repeat,
           repeating-linear-gradient(90deg, #fde047 0 40px, transparent 40px 80px) 0 128px / 100% 4px no-repeat,
           repeating-linear-gradient(90deg, #fde047 0 40px, transparent 40px 80px) 0 193px / 100% 4px no-repeat,
-          linear-gradient(#4c1d95, #3b0764);
-        border-top: 8px solid #f472b6;
+          linear-gradient(#52657d, #34445e);
+        border-top: 8px solid #fff1c9;
+        box-shadow: inset 0 4px #24334b, inset 0 -5px #24334b;
         animation: road 0.9s linear infinite;
       }
 
@@ -293,6 +300,17 @@
       @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
       @keyframes rise { to { transform: translateY(-120px) scale(1.4); opacity: 0; } }
 
+      /* Keep the full question and three large keys on compact school screens. */
+      @media (max-width: 1100px), (max-height: 680px) {
+        .scene { height: 338px; margin-top: 80px; }
+        .panel { gap: 12px; padding: 12px; }
+        .mascot-box { width: 76px; height: 100px; flex-shrink: 0; }
+        .question { gap: 20px; padding: 12px 20px; }
+        .prompt { min-width: 300px; gap: 10px; }
+        .answers { gap: 12px; }
+        .answer { width: 100px; height: 100px; }
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .track, .cloud, .racer .wheel, .mascot .eye { animation: none; }
         .flash-ok { animation-duration: 0.01ms; }
@@ -301,13 +319,34 @@
   </head>
   <body>
     <section class="scene" aria-label="Pista de carreras">
-      <svg class="hills" viewBox="0 0 1000 110" preserveAspectRatio="none" aria-hidden="true">
-        <circle cx="880" cy="34" r="24" fill="#fde047" />
-        <path d="M0 110 C120 30 220 40 330 90 S560 20 700 80 S900 40 1000 70 V110Z" fill="#86efac" />
-        <path d="M0 110 C160 70 260 80 400 100 S700 60 820 95 S950 85 1000 100 V110Z" fill="#4ade80" />
+      <!-- Layered race park, with grandstand, pit garage and distant peaks. -->
+      <svg class="hills" viewBox="0 0 1366 110" preserveAspectRatio="none" aria-hidden="true">
+        <g stroke="#24334b" stroke-width="3" stroke-linejoin="round">
+          <circle cx="1130" cy="28" r="20" fill="#ffda55" />
+          <path d="M0 100 L120 16 L204 76 L300 30 L390 100 L510 40 L610 100Z" fill="#80bcca" />
+          <path d="M83 42 L120 16 L155 43 L130 37 L118 45 L107 36Z" fill="#fff8e7" stroke="none" />
+          <path d="M0 102 Q140 63 290 94 T610 88 T940 95 T1366 80 V110 H0Z" fill="#5ebc7b" />
+          <path d="M330 100 V53 L346 42 H584 L600 53 V100Z" fill="#fff1c9" />
+          <path d="M320 45 L346 25 H584 L610 45Z" fill="#ff6f66" />
+          <path d="M346 59 H584 M346 75 H584 M346 91 H584" stroke="#6d8ba5" stroke-width="8" />
+          <g fill="#ffda55" stroke="none">
+            <circle cx="360" cy="54" r="4"/><circle cx="397" cy="70" r="4"/><circle cx="444" cy="54" r="4"/>
+            <circle cx="480" cy="86" r="4"/><circle cx="525" cy="70" r="4"/><circle cx="568" cy="54" r="4"/>
+          </g>
+          <path d="M780 105 V54 H970 V105" fill="#ffd477" />
+          <path d="M764 54 L790 32 H960 L986 54Z" fill="#3abfc5" />
+          <path d="M803 105 V68 H850 V105 M900 105 V68 H947 V105" fill="#34445e" />
+          <path d="M875 32 V8 L911 16 L875 24" fill="#ff6f66" />
+          <g fill="#35a66f">
+            <path d="M45 102 V61 M18 75 Q10 40 45 35 Q80 40 72 75Z" />
+            <path d="M1250 102 V57 M1223 70 Q1215 35 1250 30 Q1285 35 1277 70Z" />
+          </g>
+          <path d="M0 108 H1366" stroke-width="6" />
+          <path d="M0 103 H1366" stroke="#fff1c9" stroke-width="6" stroke-dasharray="30 30" />
+        </g>
       </svg>
-      <div class="cloud" style="top: 14px; width: 90px; animation-delay: -6s"></div>
-      <div class="cloud" style="top: 40px; width: 70px; animation-delay: -24s"></div>
+      <div class="cloud" aria-hidden="true" style="top: 14px; width: 90px; animation-delay: -6s"></div>
+      <div class="cloud" aria-hidden="true" style="top: 40px; width: 70px; animation-delay: -24s"></div>
       <div class="track"></div>
     </section>
     <section class="panel">
@@ -393,10 +432,15 @@
       function kartSvg(body, helmet, number) {
         return `<svg class="kart" viewBox="0 0 120 62" aria-hidden="true">
           <path class="flame" d="M20 30 L0 24 L8 34 L0 44 L20 40Z" fill="#fb923c" stroke="#facc15" stroke-width="3" />
-          <path d="M18 44 Q20 26 42 24 L78 22 Q104 24 112 40 L112 48 L18 48Z" fill="${body}" stroke="#1e1b4b" stroke-width="3" />
+          <ellipse cx="66" cy="57" rx="48" ry="4" fill="#24334b" opacity=".25" />
+          <path d="M15 26 V43 H26 V26Z" fill="${helmet}" stroke="#24334b" stroke-width="3" />
+          <path d="M18 44 L25 31 L53 28 L65 22 H84 L92 32 L110 36 L115 48 H18Z" fill="${body}" stroke="#24334b" stroke-width="3" stroke-linejoin="round" />
+          <path d="M71 26 H82 L89 34 H68Z" fill="#b9f4ff" stroke="#24334b" stroke-width="2" />
+          <path d="M26 36 H48 M78 43 H102" stroke="#fff1c9" stroke-width="3" stroke-linecap="round" />
+          <rect x="108" y="38" width="8" height="6" rx="2" fill="#ffda55" stroke="#24334b" stroke-width="2" />
           <rect x="52" y="30" width="22" height="12" rx="4" fill="#fff" />
           <text x="63" y="40" font-size="11" font-weight="900" text-anchor="middle" fill="#1e1b4b">${number}</text>
-          <circle cx="44" cy="16" r="13" fill="${helmet}" stroke="#1e1b4b" stroke-width="3" />
+          <circle cx="44" cy="16" r="13" fill="${helmet}" stroke="#24334b" stroke-width="3" />
           <path d="M46 10 h11 a4 4 0 0 1 0 10 h-11Z" fill="#a5f3fc" stroke="#1e1b4b" stroke-width="2" />
           <g class="wheel"><circle cx="34" cy="50" r="10" fill="#111827" /><rect x="32" y="42" width="4" height="16" fill="#9ca3af" /></g>
           <g class="wheel"><circle cx="96" cy="50" r="10" fill="#111827" /><rect x="94" y="42" width="4" height="16" fill="#9ca3af" /></g>
