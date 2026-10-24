@@ -6,7 +6,23 @@
     <title>Piano de letras</title>
     <link rel="stylesheet" href="../assets/common.css" />
     <style>
-      body { background: linear-gradient(#ddd6fe, #f0f9ff 75%, #bae6fd); }
+      body { background: #b7e3dc; }
+      .workshop { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+      main { position: relative; }
+      #target { position: relative; }
+      #target#target { border-color: #24334b; background: #fff5da; box-shadow: 0 10px 0 #24334b; color: #24334b; }
+      #keyboard#keyboard { border: 5px solid #24334b; background: #efaa63; box-shadow: 0 10px 0 #24334b; }
+      .key.key { border-color: #24334b; background: #fff5da; color: #24334b; box-shadow: 0 5px 0 #24334b; }
+      .key.key.target { background: #ffda61; border-color: #24334b; box-shadow: 0 5px 0 #24334b, 0 0 0 4px #fff5da; }
+      .key.key.wrong { background: #c4b5ef; }
+      #feedback { position: absolute; left: calc(50% + 105px); top: 26%; display: grid; place-items: center; width: 72px; height: 72px; border: 4px solid #24334b; border-radius: 50%; background: #fff5da; color: #24334b; font-size: 52px; font-weight: bold; }
+      #feedback:empty { visibility: hidden; }
+      #feedback[data-kind="success"] { background: #69dfbd; }
+      #feedback[data-kind="retry"] { background: #c4b5ef; }
+      #keyboard-hint { position: absolute; top: 105px; right: 24px; width: 160px; padding: 8px; border: 4px solid #24334b; border-radius: 18px; background: #fff5da; pointer-events: none; }
+      #keyboard-hint svg { display: block; width: 100%; height: 85px; }
+      #keyboard-hint[hidden] { display: none; }
+      @media (max-height: 650px) { #feedback { top: 23%; left: calc(50% + 80px); width: 58px; height: 58px; font-size: 40px; } #keyboard-hint { width: 125px; } }
       main { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px; padding: 105px 12px 20px; }
       #target { display: grid; place-items: center; width: 170px; height: 170px; font-size: 110px; background: white; border: 5px solid #8b5cf6; border-radius: 28px; box-shadow: 0 12px 0 #a78bfa; }
       #keyboard { width: min(940px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 20px 12px; border-radius: 24px; background: #c4b5fd; }
@@ -23,7 +39,27 @@
     </style>
   </head>
   <body>
+    <svg class="workshop" viewBox="0 0 1366 768" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <g stroke="#24334b" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0 620h1366v148H0z" fill="#dfaa79"/>
+        <path d="M0 710h1366m-1166-90v90m230 0v58m250-148v90m250 0v58m250-148v90" stroke="#bc865e"/>
+        <rect x="50" y="140" width="185" height="260" rx="28" fill="#fff5da"/>
+        <circle cx="142" cy="215" r="40" fill="#ad9df0"/><circle cx="142" cy="320" r="57" fill="#52699a"/><circle cx="142" cy="320" r="22" fill="#24334b"/>
+        <rect x="1130" y="140" width="185" height="260" rx="28" fill="#fff5da"/>
+        <circle cx="1222" cy="215" r="40" fill="#fb7d83"/><circle cx="1222" cy="320" r="57" fill="#52699a"/><circle cx="1222" cy="320" r="22" fill="#24334b"/>
+        <path d="M340 140v110q-32-8-32 16t32 9V167l70-17v80q-32-8-32 16t32 9V125Z" fill="#fb7d83"/>
+        <path d="M1000 140v88q-32-8-32 16t32 9v-78l35 16" fill="#ffcc58"/>
+        <path d="M470 175q213-70 426 0" fill="none" stroke="#fff5da" stroke-dasharray="4 25"/>
+        <path d="M80 620v-91h65v91m1075 0v-91h65v91" fill="#ad9df0"/>
+        <path d="M56 529h115m1025 0h115" stroke="#24334b" stroke-width="15"/>
+        <path d="m255 68 16 20-16 20-16-20zm830 0 16 20-16 20-16-20z" fill="#ffcc58"/>
+      </g>
+    </svg>
     <main aria-label="Piano de letras">
+      <div id="feedback" role="status" aria-label="Resultado de la tecla"></div>
+      <div id="keyboard-hint" role="img" aria-label="Pulsa la tecla en tu teclado físico" hidden>
+        <svg viewBox="0 0 160 95" aria-hidden="true"><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><rect x="5" y="42" width="150" height="48" rx="8" fill="#ad9df0"/><path d="M16 55h128M16 67h128m-110-16v20m20-20v20m20-20v20m20-20v20m20-20v20m20-20v20M40 80h80" fill="none"/><path d="M72 7v23H60l20 19 20-19H88V7Z" fill="#ffcc58"/></g></svg>
+      </div>
       <div id="target" aria-label="Tecla que debes pulsar" aria-live="polite"></div>
       <div id="keyboard" aria-label="Teclado español"></div>
     </main>
@@ -35,6 +71,16 @@
       const progress = Juegos.progress(10);
       const medals = Juegos.medals();
       const target = document.getElementById("target");
+      const feedback = document.getElementById('feedback');
+      const keyboardHint = document.getElementById('keyboard-hint');
+      document.getElementById('keyboard').addEventListener('click', () => {
+        if (playing) keyboardHint.hidden = false;
+      });
+      function showFeedback(kind) {
+        feedback.dataset.kind = kind;
+        feedback.textContent = kind === 'success' ? '✓' : '↺';
+        feedback.setAttribute('aria-label', kind === 'success' ? 'Bien' : 'Prueba la tecla iluminada');
+      }
       const keys = new Map();
       const flashTimers = new Map();
       let level = 0;
@@ -90,6 +136,8 @@
       function startLevel() {
         successes = 0;
         position = 0;
+        feedback.textContent = '';
+        keyboardHint.hidden = true;
         progress.set(0);
         showTarget();
         playing = true;
@@ -112,6 +160,7 @@
         const key = event.key.toUpperCase();
         if (key !== target.textContent) {
           Juegos.sound.oops();
+          showFeedback('retry');
           const cap = keys.get(key);
           if (cap) {
             cap.classList.add("wrong");
@@ -123,6 +172,8 @@
           }
           return;
         }
+        showFeedback('success');
+        keyboardHint.hidden = true;
         Juegos.sound.piano(key);
         const box = target.getBoundingClientRect();
         Juegos.burst(box.x + box.width / 2, box.y + box.height / 2, "⭐");
@@ -136,7 +187,9 @@
           showTarget();
         }
       });
-      Juegos.startScreen("🎹").then(startLevel);
+      const preview = document.createElement('div');
+      preview.innerHTML = '<svg width="170" height="140" viewBox="0 0 170 140" aria-hidden="true"><g stroke="#24334b" stroke-width="5" stroke-linejoin="round"><rect x="5" y="43" width="160" height="89" rx="15" fill="#efaa63"/><path d="M20 64h130v54H20z" fill="#fff5da"/><path d="M46 64v54m26-54v54m26-54v54m26-54v54"/><path d="M40 64h12v28H40zm26 0h12v28H66zm52 0h12v28h-12z" fill="#24334b"/><path d="M85 8v24q-25-8-25 8t25 6V18l30 8" fill="#fb7d83"/></g></svg>';
+      Juegos.startScreen(preview).then(startLevel);
     </script>
   </body>
 </html>

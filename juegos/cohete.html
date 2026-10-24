@@ -6,7 +6,16 @@
     <title>Cohete saltarín</title>
     <link rel="stylesheet" href="../assets/common.css" />
     <style>
-      body { background: linear-gradient(#172554, #4338ca 75%, #818cf8); }
+      body { background: #25366b; }
+      .space-scene { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+      #land, #pad { pointer-events: none; }
+      #rocket svg, .star svg { width: 100%; height: 100%; pointer-events: none; }
+      #rocket { filter: drop-shadow(0 5px 0 #151f4680); }
+      #land { border-color: #24334b !important; background: repeating-linear-gradient(90deg, #ffcc58 0 45px, #ca8753 45px 90px) !important; }
+      #pad { border: 4px solid #24334b; background: #fff0cf !important; }
+      .key.key { border-color: #24334b; background: #fff5da; box-shadow: 0 8px #142341; }
+      .key.key.lit, .key.key.hint { background: #ffcc58; }
+      .key.key.active, .key.key.hint { border-color: #ffcc58; }
       #world { position: fixed; inset: 110px 0 130px; overflow: hidden; }
       #land { position: absolute; bottom: 0; width: 100%; height: 24px; background: repeating-linear-gradient(90deg, #a5b4fc 0 45px, #6366f1 45px 90px); border-top: 5px solid #e0e7ff; }
       #pad { position: absolute; bottom: 24px; left: 95px; width: 130px; height: 15px; border-radius: 10px; background: #cbd5e1; }
@@ -25,8 +34,27 @@
   </head>
   <body>
     <div id="world" data-state="start" data-missed="0" aria-label="Cielo del cohete">
-      <div id="land"></div><div id="pad"></div>
-      <div id="rocket" data-height="0" data-hops="0" aria-label="Cohete">🚀</div>
+      <svg class="space-scene" viewBox="0 0 1366 528" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        <g fill="#fff0cf"><circle cx="85" cy="65" r="3"/><circle cx="340" cy="120" r="4"/><circle cx="660" cy="40" r="3"/><circle cx="860" cy="190" r="3"/><circle cx="1280" cy="100" r="4"/><path d="m510 55 4 12 12 4-12 4-4 12-4-12-12-4 12-4zm430 30 4 12 12 4-12 4-4 12-4-12-12-4 12-4z"/></g>
+        <g stroke="#24334b" stroke-width="7" stroke-linejoin="round">
+          <circle cx="1110" cy="105" r="65" fill="#ffbf69"/>
+          <path d="M1002 142q110-100 216-88M1002 142q120 20 216-88" fill="none" stroke="#ad9df0" stroke-width="17"/>
+          <path d="m0 400 145-88 140 90 135-49 205 80 170-65 200 51 142-96 229 77v128H0z" fill="#5267a1"/>
+          <path d="m0 463 218-57 202 70 230-49 215 43 255-80 246 59v79H0z" fill="#8297bd"/>
+          <path d="M35 490V220h90v270M35 250h90m-90 60h90m-90 60h90m-90 60h90M35 220l90 90m-90 0 90 60m-90 0 90 60" fill="none" stroke="#ffbf69"/>
+          <path d="M125 250h105v25H125z" fill="#fff0cf"/>
+          <path d="M1030 494v-75q0-80 105-80t105 80v75" fill="#63c8c3"/>
+          <path d="M1080 495v-61h110v61" fill="#24334b"/>
+          <path d="M1135 338v-45m-35 0h70" fill="none"/>
+          <circle cx="1135" cy="285" r="12" fill="#fb7d83"/>
+          <path d="M970 494h330" stroke="#fff0cf"/>
+          <ellipse cx="760" cy="500" rx="62" ry="10" fill="#5267a1"/>
+        </g>
+      </svg>
+      <div id="land" aria-hidden="true"></div><div id="pad" aria-hidden="true"></div>
+      <div id="rocket" data-height="0" data-hops="0" aria-label="Cohete">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><g stroke="#24334b" stroke-width="5" stroke-linejoin="round"><path d="m26 65-15 22 28-8m35-14 15 22-28-8" fill="#fb7d83"/><path d="M37 78 50 98l13-20" fill="#ffcc58"/><path d="M28 74Q22 30 50 5q28 25 22 69Z" fill="#fff5da"/><path d="M32 29 50 5l18 24Z" fill="#fb7d83"/><circle cx="50" cy="49" r="14" fill="#63c8e0"/><path d="M31 73h38" stroke="#ad9df0" stroke-width="9"/></g></svg>
+      </div>
     </div>
     <div id="enter-key" class="key" aria-label="Tecla Enter">ENTER</div>
     <div id="space-key" class="key" aria-label="Barra espaciadora"></div>
@@ -69,7 +97,7 @@
         const elevation = cfg.heights[sequence++ % cfg.heights.length];
         const el = document.createElement('div');
         el.className = 'star';
-        el.textContent = '⭐';
+        el.innerHTML = '<svg viewBox="0 0 60 60" aria-hidden="true"><path d="m30 4 8 16 18 3-13 13 3 19-16-9-16 9 3-19L4 23l18-3z" fill="#ffcc58" stroke="#24334b" stroke-width="4" stroke-linejoin="round"/><path d="m26 18-5 9" stroke="#fff5da" stroke-width="4" stroke-linecap="round"/></svg>';
         el.setAttribute('aria-label', 'Estrella');
         el.dataset.height = elevation;
         world.appendChild(el);
@@ -149,7 +177,10 @@
         }
         requestAnimationFrame(loop);
       }
-      Juegos.startScreen('🚀').then(startLevel);
+      const preview = rocket.cloneNode(true);
+      preview.removeAttribute('id');
+      preview.style.cssText = 'width:150px;height:150px';
+      Juegos.startScreen(preview).then(startLevel);
       requestAnimationFrame(t => { lastTime = t; loop(t); });
     </script>
   </body>
