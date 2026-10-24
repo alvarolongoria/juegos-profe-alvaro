@@ -1,86 +1,85 @@
 <!doctype html>
 <html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Juegos del profe Álvaro</title>
-    <link rel="stylesheet" href="assets/common.css" />
-    <style>
-      body {
-        background: linear-gradient(135deg, #fde68a, #fbcfe8 50%, #bfdbfe);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        overflow-y: auto;
-      }
-
-      h1 {
-        margin: 32px 16px 8px;
-        font-size: clamp(32px, 5vw, 56px);
-        color: #1e3a8a;
-        text-align: center;
-        text-shadow: 3px 3px 0 #fff;
-      }
-
-      .games {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 32px;
-        width: min(1200px, 92vw);
-        padding: 32px 0 48px;
-      }
-
-      .card {
-        aspect-ratio: 1;
-        border-radius: 36px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 120px;
-        text-decoration: none;
-        box-shadow: 0 12px 0 rgba(0, 0, 0, 0.15);
-        transition: transform 0.15s;
-      }
-
-      a.card:hover {
-        transform: scale(1.08) rotate(-2deg);
-      }
-
-      a.card:active {
-        transform: scale(1.02) translateY(6px);
-      }
-
-      .card.soon {
-        filter: grayscale(1) opacity(0.45);
-        position: relative;
-      }
-
-      .card.soon::after {
-        content: "🔒";
-        position: absolute;
-        right: 18px;
-        bottom: 12px;
-        font-size: 48px;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>🎮 Juegos del profe Álvaro</h1>
-    <main class="games">
-      <!-- Ready games are links; upcoming ones are locked cards. -->
-      <a class="card" href="juegos/estrellas.html" style="background: #fef08a" aria-label="Enciende las estrellas">🌟</a>
-      <a class="card" href="juegos/burbujas.html" style="background: #bae6fd" aria-label="Cazaburbujas"><span class="bubble-look bubble-icon"></span></a>
-      <a class="card" href="juegos/monstruos.html" style="background: #ddd6fe" aria-label="Fábrica de monstruos">👾</a>
-      <a class="card" href="juegos/cohete.html" style="background: #fecaca" aria-label="Cohete saltarín">🚀</a>
-      <a class="card" href="juegos/piano.html" style="background: #bbf7d0" aria-label="Piano de letras">🎹</a>
-      <a class="card" href="juegos/carrera.html" style="background: #fbcfe8" aria-label="Gran Carrera">🏁</a>
-      <a class="card" href="juegos/hamburgueseria.html" style="background: #fed7aa" aria-label="La Hamburguesería">🍔</a>
-      <a class="card" href="juegos/topos.html" style="background: #d9f99d" aria-label="Aplasta Topos">🔨</a>
-      <a class="card" href="juegos/pinta.html" style="background: #fde68a" aria-label="Pinta el Camino">🎨</a>
-    </main>
-    <script src="assets/common.js"></script>
-    <script>
-      Juegos.guardRightClick();
-    </script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Juegos del profe Álvaro</title>
+  <link rel="stylesheet" href="assets/common.css" />
+  <style>
+    html { overflow-y: auto; }
+    body { height: auto; min-height: 100%; background: #a9e2e5; background-image: radial-gradient(circle at 15% 10%, #fff7dc 0 8%, transparent 8.2%), linear-gradient(155deg, transparent 45%, #b5dbb5 45%); overflow-y: auto; }
+    h1 { margin: 28px 16px 8px; font-size: clamp(30px, 4vw, 50px); color: #24334b; text-align: center; text-shadow: 2px 3px #fff7e4; }
+    .games { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; width: min(1120px, 92vw); margin: auto; padding: 24px 0 48px; }
+    .card { position: relative; display: block; border: 4px solid #24334b; border-radius: 30px; overflow: hidden; background: #fff7e4; box-shadow: 0 8px #24334b; transition: transform .15s; }
+    .card svg { display: block; width: 100%; aspect-ratio: 320 / 210; pointer-events: none; }
+    .card::after { content: ''; position: absolute; right: 15px; bottom: 14px; width: 46px; height: 46px; border: 3px solid #24334b; border-radius: 50%; background: #fff7e4; box-shadow: 0 3px #24334b; }
+    .card::before { content: ''; position: absolute; z-index: 1; right: 30px; bottom: 28px; border-left: 16px solid #24334b; border-top: 10px solid transparent; border-bottom: 10px solid transparent; }
+    .card:hover { transform: translateY(-5px); }
+    .card:active { transform: translateY(5px); }
+    @media (max-width: 640px) { .games { grid-template-columns: repeat(2, 1fr); gap: 20px; } }
+    @media (prefers-reduced-motion: reduce) { .card { transition: none; } .card:hover { transform: none; } }
+  </style>
+</head>
+<body>
+  <h1>Juegos del profe Álvaro</h1>
+  <main class="games">
+    <a class="card" href="juegos/estrellas.html" aria-label="Enciende las estrellas">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#34456e" d="M0 0h320v210H0z"/><g fill="#fff7e4"><circle cx="40" cy="40" r="4"/><circle cx="268" cy="34" r="5"/><circle cx="285" cy="105" r="3"/><circle cx="87" cy="21" r="3"/></g>
+        <path fill="#7d83bb" d="M0 173Q70 124 146 172T320 155V210H0"/><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path fill="#ffda55" d="m151 30 24 49 54 8-39 38 9 54-48-26-48 26 9-54-39-38 54-8z"/><path fill="none" stroke="#fff7e4" d="M49 80Q14 128 60 150M250 55q40 40 5 75"/></g>
+        <g fill="#24334b"><ellipse cx="133" cy="108" rx="5" ry="8"/><ellipse cx="168" cy="108" rx="5" ry="8"/></g><path d="M138 130q13 12 26 0" fill="none" stroke="#24334b" stroke-width="4" stroke-linecap="round"/>
+      </svg>
+    </a>
+    <a class="card" href="juegos/burbujas.html" aria-label="Cazaburbujas">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#8bdbec" d="M0 0h320v210H0z"/><path fill="#f4d59a" d="M0 175q80-35 160 0t160-5v40H0"/>
+        <g stroke="#24334b" stroke-width="4"><path fill="#ffbd67" d="m31 130 19-24 20 24-20 30z"/><circle cx="147" cy="93" r="61" fill="#bdeff5"/><circle cx="59" cy="49" r="24" fill="#ecb8eb"/><circle cx="260" cy="82" r="34" fill="#a1ead7"/><path fill="#63ba85" d="M30 208q-20-50 7-57l6 57m30 0q-10-65 13-67l-1 67"/></g>
+        <g fill="none" stroke="#fff7e4" stroke-width="9" stroke-linecap="round"><path d="M111 78q5-23 28-26M44 44l6-7M245 71l10-9"/></g><circle cx="167" cy="127" r="9" fill="#fff7e4"/>
+      </svg>
+    </a>
+    <a class="card" href="juegos/monstruos.html" aria-label="Fábrica de monstruos">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#b7a5df" d="M0 0h320v210H0z"/><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M0 46h53v70M320 40h-47v65" fill="none" stroke="#fff7e4" stroke-width="15"/><path fill="#67718c" d="M0 166h320v44H0z"/><path fill="#67d5bd" d="M91 159V89q0-51 65-51t65 51v70z"/><path fill="#ffbd67" d="m110 49-13-29 35 20m49 0 31-20-10 33"/><rect x="104" y="72" width="104" height="42" rx="18" fill="#fff7e4"/><path d="M119 134q35 36 72 0z" fill="#f07599"/><path fill="#fff7e4" d="M137 139v12h15v-8"/></g>
+        <g fill="#24334b"><circle cx="131" cy="91" r="9"/><circle cx="181" cy="91" r="9"/><circle cx="36" cy="187" r="10"/><circle cx="84" cy="187" r="10"/><circle cx="132" cy="187" r="10"/></g>
+      </svg>
+    </a>
+    <a class="card" href="juegos/cohete.html" aria-label="Cohete saltarín">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#34456e" d="M0 0h320v210H0z"/><g fill="#ffda55"><path d="m42 38 6 11 13 2-10 9 2 13-11-6-12 6 3-13-10-9 13-2z"/><circle cx="263" cy="30" r="4"/></g>
+        <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><ellipse cx="263" cy="91" rx="38" ry="27" fill="#a58bdf"/><path d="m211 107 96-31" stroke="#ffbd67" stroke-width="12"/><path fill="#ffbd67" d="m133 149 19 51 22-51"/><path fill="#ff7865" d="m127 104-30 45h37m39-45 33 45h-38"/><path fill="#fff7e4" d="M128 145V76q0-31 25-51 25 20 25 51v69z"/><path fill="#ff7865" d="M130 65q6-23 23-40 18 17 23 40z"/><circle cx="153" cy="93" r="17" fill="#55cbd1"/></g><path fill="#7183a3" d="M0 196q40-42 82-8l30 22H0"/>
+      </svg>
+    </a>
+    <a class="card" href="juegos/piano.html" aria-label="Piano de letras">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#f1b3ce" d="M0 0h320v210H0z"/><path fill="#b481bc" d="M0 0h38v210H0m282-210h38v210h-38"/>
+        <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><rect x="48" y="100" width="224" height="88" rx="12" fill="#fff7e4"/><path d="M80 103v81m32-81v81m32-81v81m32-81v81m32-81v81m32-81v81"/><path d="M72 102h16v46H72zm32 0h16v46h-16zm64 0h16v46h-16zm32 0h16v46h-16zm32 0h16v46h-16z" fill="#24334b"/><rect x="126" y="22" width="68" height="62" rx="14" fill="#ffda55"/><path d="m144 68 16-30 16 30m-26-10h20" fill="none"/><path d="M65 64V36l22-6v28m145 12V42l20-7v28" fill="none"/><ellipse cx="59" cy="65" rx="9" ry="6" fill="#55cbd1"/><ellipse cx="226" cy="72" rx="9" ry="6" fill="#55cbd1"/></g>
+      </svg>
+    </a>
+    <a class="card" href="juegos/carrera.html" aria-label="Gran Carrera">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#8bdbec" d="M0 0h320v210H0z"/><path fill="#73be88" d="M0 108q62-60 124-13t196-15v130H0"/><path fill="#66758c" d="M85 210 180 91h40l80 119"/><path d="m199 109-4 23m-8 17-13 27" stroke="#fff7e4" stroke-width="6"/>
+        <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M265 101V22"/><path fill="#fff7e4" d="M265 24h44v39h-44z"/><path fill="#24334b" d="M265 24h14v13h-14zm28 0h16v13h-16zm-14 13h14v13h-14zm-14 13h14v13h-14zm28 0h16v13h-16z"/><path fill="#ff7865" d="M62 146h26l21-31h51l25 31h16v31H62z"/><path fill="#bdeff5" d="m104 142 12-20h37l17 20z"/><circle cx="94" cy="176" r="16" fill="#24334b"/><circle cx="175" cy="176" r="16" fill="#24334b"/></g><g fill="#fff7e4"><circle cx="94" cy="176" r="6"/><circle cx="175" cy="176" r="6"/></g>
+      </svg>
+    </a>
+    <a class="card" href="juegos/hamburgueseria.html" aria-label="La Hamburguesería">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#bde7dc" d="M0 0h320v210H0z"/><path fill="#fff7e4" d="M0 0h320v38H0"/><path d="M20 0v38m56-38v38m56-38v38m56-38v38m56-38v38m56-38v38" stroke="#ff7865" stroke-width="28"/><path fill="#d49a70" d="M0 170h320v40H0"/>
+        <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><ellipse cx="150" cy="176" rx="94" ry="15" fill="#fff7e4"/><path fill="#ffbd67" d="M76 112q0-58 75-58t75 58z"/><path d="M79 125q15-17 30 0t30 0 30 0 30 0 27 0" fill="none" stroke="#58ba78" stroke-width="13"/><rect x="80" y="133" width="143" height="20" rx="10" fill="#805047"/><path fill="#ffda55" d="m81 131 36 23 22-23h83z"/><path fill="#ffbd67" d="M78 159h147q0 20-25 20H103q-25 0-25-20z"/></g><path d="m118 83 5-3m25-6 6 1m27 7 6 3" stroke="#fff7e4" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+    </a>
+    <a class="card" href="juegos/topos.html" aria-label="Aplasta Topos">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#bde7dc" d="M0 0h320v210H0z"/><path fill="#73be88" d="M0 90q75-30 155 0t165 0v120H0"/>
+        <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M0 61h320M22 23v74m47-74v74m47-74v74m47-74v74m47-74v74m47-74v74m47-74v74" stroke="#fff7e4" stroke-width="12"/><ellipse cx="147" cy="177" rx="69" ry="18" fill="#805047"/><path fill="#b98a70" d="M99 173v-47q0-47 48-47t48 47v47"/><circle cx="102" cy="102" r="14" fill="#b98a70"/><circle cx="191" cy="102" r="14" fill="#b98a70"/><ellipse cx="147" cy="140" rx="28" ry="22" fill="#f4d7b6"/><ellipse cx="147" cy="131" rx="10" ry="7" fill="#f07599"/></g><g fill="#24334b"><circle cx="127" cy="117" r="5"/><circle cx="167" cy="117" r="5"/></g><path d="M25 162v-24m-10 11h20m220-25v-24m-10 11h20" stroke="#ffda55" stroke-width="6"/>
+      </svg>
+    </a>
+    <a class="card" href="juegos/pinta.html" aria-label="Pinta el Camino">
+      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+        <path fill="#ffda83" d="M0 0h320v210H0z"/><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path fill="#b98a70" d="m94 206 42-157h37l40 157m-87-34h60"/><rect x="56" y="25" width="202" height="143" rx="10" fill="#fff7e4"/><path fill="#8bdbec" d="M68 37h178v119H68z"/><path fill="#73be88" d="m68 142 47-49 42 39 38-27 51 32v19H68z"/><circle cx="208" cy="65" r="17" fill="#ffda55"/><path d="m79 156 59-54 42 54z" fill="#ff7865"/><path d="M123 132h29v24h-29z" fill="#fff7e4"/><path d="m249 143 24-75 12 4-23 75" fill="#b98a70"/><path d="m273 68 3-25q28 10 9 29z" fill="#55cbd1"/></g>
+      </svg>
+    </a>
+  </main>
+  <script src="assets/common.js"></script>
+  <script>Juegos.guardRightClick();</script>
+</body>
 </html>
