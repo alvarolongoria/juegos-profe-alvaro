@@ -7,10 +7,19 @@
     <link rel="stylesheet" href="../assets/common.css" />
     <style>
       body {
-        background: linear-gradient(#7dd3fc 0 34%, #bef264 34%, #65a30d);
+        background: #b9e9e6;
+      }
+
+      .world-art {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
       }
 
       .cloud {
+        pointer-events: none;
         position: absolute;
         height: 34px;
         border-radius: 20px;
@@ -32,6 +41,7 @@
       .flower {
         position: absolute;
         font-size: 34px;
+        pointer-events: none;
       }
 
       .hole {
@@ -60,7 +70,8 @@
         bottom: 6px;
         height: 64px;
         border-radius: 50%;
-        background: radial-gradient(#1c0f05 55%, #422006);
+        background: #24334b;
+        border: 5px solid #c28b50;
       }
 
       .hole::after {
@@ -71,7 +82,7 @@
         bottom: 0;
         height: 40px;
         border-radius: 0 0 50% 50%;
-        border-bottom: 14px solid #854d0e;
+        border-bottom: 14px solid #c28b50;
         pointer-events: none;
       }
 
@@ -95,6 +106,7 @@
         pointer-events: none;
       }
 
+      .start-mole .face-hit,
       .mole .face-hit,
       .mole.hit .face-ok {
         display: none;
@@ -107,6 +119,11 @@
       .mole.hit svg {
         animation: squash 0.3s ease-out;
         transform-origin: 50% 100%;
+      }
+
+      @media (max-height: 700px) {
+        .hole { scale: 0.78; transform-origin: 50% 0; }
+        .hole { margin-top: -65px; }
       }
 
       .start-mole {
@@ -124,6 +141,28 @@
     </style>
   </head>
   <body>
+    <svg class="world-art" viewBox="0 0 1366 768" preserveAspectRatio="none" aria-hidden="true">
+      <g stroke="#24334b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0 315 Q220 200 470 300 Q740 185 1010 300 Q1240 200 1366 280 V768 H0Z" fill="#80c990"/>
+        <path d="M0 395 Q380 310 680 385 Q1050 300 1366 375 V768 H0Z" fill="#abd976"/>
+        <g fill="#fff2cb">
+          <path d="M0 295 H1366 V333 H0Z"/>
+          <path d="M40 360 V225 L60 204 L80 225 V360Z M155 350 V225 L175 204 L195 225 V350Z M1170 350 V225 L1190 204 L1210 225 V350Z M1290 360 V225 L1310 204 L1330 225 V360Z"/>
+        </g>
+        <path d="M0 710 Q650 635 1366 710 V768 H0Z" fill="#77be7b"/>
+        <g transform="translate(15 440)">
+          <path d="M25 180 V30 Q5 0 15 -20 Q60 -5 45 30 V180 M48 180 Q98 150 83 110 Q48 119 48 159" fill="#37a786"/>
+          <path d="M0 180 H82 L70 240 H13Z" fill="#ed9566"/>
+          <path d="M-5 177 H88 V195 H-5Z" fill="#ffba80"/>
+        </g>
+        <g transform="translate(1250 445)">
+          <path d="M10 130 Q-15 60 25 45 Q50 80 35 130 M35 130 Q35 30 70 20 Q100 60 60 130" fill="#37a786"/>
+          <path d="M0 130 H90 L75 205 H15Z" fill="#ed9566"/>
+          <path d="M-5 125 H95 V145 H-5Z" fill="#ffba80"/>
+        </g>
+        <path d="M110 740 Q130 690 150 740 M1150 746 Q1170 697 1190 746" fill="#37a786"/>
+      </g>
+    </svg>
     <div class="cloud" style="top: 130px; width: 110px; animation-delay: -10s" aria-hidden="true"></div>
     <div class="cloud" style="top: 190px; width: 80px; animation-delay: -32s" aria-hidden="true"></div>
     <script src="../assets/common.js"></script>
@@ -143,7 +182,7 @@
 
       function moleSvg() {
         return `<svg viewBox="0 0 160 160" aria-hidden="true">
-          <path d="M14 160 V78 Q14 10 80 10 Q146 10 146 78 V160Z" fill="#a16207" stroke="#422006" stroke-width="5" />
+          <path d="M14 160 V78 Q14 10 80 10 Q146 10 146 78 V160Z" fill="#b87b55" stroke="#24334b" stroke-width="5" />
           <ellipse cx="80" cy="100" rx="40" ry="30" fill="#fde68a" />
           <ellipse cx="80" cy="82" rx="14" ry="10" fill="#f472b6" stroke="#422006" stroke-width="3" />
           <rect x="72" y="104" width="8" height="12" rx="2" fill="#fff" stroke="#422006" stroke-width="2" />

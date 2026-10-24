@@ -7,10 +7,19 @@
     <link rel="stylesheet" href="../assets/common.css" />
     <style>
       body {
-        background: radial-gradient(ellipse at 50% 120%, #4c1d95, #1e1b4b 55%, #0b0a24);
+        background: radial-gradient(ellipse at 50% 90%, #6755aa, #24334b 75%);
+      }
+
+      .world-art {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
       }
 
       .sky-dot {
+        pointer-events: none;
         position: absolute;
         width: 4px;
         height: 4px;
@@ -84,7 +93,29 @@
     </style>
   </head>
   <body>
-    <div class="moon" aria-hidden="true"></div>
+    <svg class="world-art" viewBox="0 0 1366 768" preserveAspectRatio="none" aria-hidden="true">
+      <g stroke="#24334b" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M0 615 L150 365 L300 580 L480 380 L720 640 L940 400 L1160 600 L1290 390 L1366 510 V768 H0Z" fill="#7779ba"/>
+        <path d="M107 436 L150 365 L204 444 L170 432 L150 451 L133 425Z M429 444 L480 380 L542 453 L500 440 L479 460 L459 430Z M897 457 L940 400 L992 471 L950 451 L934 470Z" fill="#e4def6"/>
+        <path d="M0 694 Q300 590 620 710 Q980 580 1366 675 V768 H0Z" fill="#344e79"/>
+        <path d="M0 755 Q320 670 700 753 Q1040 670 1366 730 V768 H0Z" fill="#24334b"/>
+        <g transform="translate(1120 160)">
+          <circle r="73" fill="#ffdc75"/>
+          <path d="M-25 -65 Q-77 15 15 65 Q-60 74 -72 7 Q-78 -43 -25 -65Z" fill="#efb85a" stroke="none"/>
+          <circle cx="20" cy="-25" r="13" fill="#efb85a" stroke="none"/>
+          <circle cx="39" cy="25" r="9" fill="#efb85a" stroke="none"/>
+        </g>
+        <g transform="translate(90 565)">
+          <path d="M20 102 L60 20 L100 102 M60 20 V110" fill="none" stroke="#ffe6a3" stroke-width="10"/>
+          <path d="M10 15 L96 -24 L112 14 L27 53Z" fill="#53d4cb"/>
+          <path d="M91 -31 L112 -39 L130 9 L110 17Z" fill="#ff809e"/>
+          <circle cx="60" cy="40" r="12" fill="#ffdc75"/>
+        </g>
+        <path d="M1220 735 V624 L1285 570 L1350 624 V735Z" fill="#9a82cd"/>
+        <path d="M1207 625 L1285 554 L1363 625Z" fill="#ff809e"/>
+        <path d="M1263 735 V683 Q1285 655 1307 683 V735 M1240 640 H1258 V658 H1240Z M1312 640 H1330 V658 H1312Z" fill="#ffdc75"/>
+      </g>
+    </svg>
     <script src="../assets/common.js"></script>
     <script>
       // Each level: star size (px), drift speed (px/s) and seconds to hold.
@@ -104,7 +135,7 @@
           : "";
         return `<svg viewBox="0 0 100 100" aria-hidden="true">${ring}
           <g class="body">
-            <path d="M50 14 L59 38 L85 39 L65 55 L72 80 L50 66 L28 80 L35 55 L15 39 L41 38Z" fill="#fde047" stroke="#f59e0b" stroke-width="3" stroke-linejoin="round" />
+            <path d="M50 14 L59 38 L85 39 L65 55 L72 80 L50 66 L28 80 L35 55 L15 39 L41 38Z" fill="#fde047" stroke="#24334b" stroke-width="3" stroke-linejoin="round" />
             <circle cx="43" cy="49" r="3.5" fill="#1e1b4b" /><circle cx="57" cy="49" r="3.5" fill="#1e1b4b" />
             <circle cx="38" cy="56" r="3" fill="#fb923c" opacity=".6" /><circle cx="62" cy="56" r="3" fill="#fb923c" opacity=".6" />
             <path d="M44 57 Q50 63 56 57" fill="none" stroke="#1e1b4b" stroke-width="2.5" stroke-linecap="round" />

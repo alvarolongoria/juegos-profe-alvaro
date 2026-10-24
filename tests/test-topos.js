@@ -32,6 +32,8 @@ async function whackNext(page) {
     game = await openGame("juegos/topos.html");
     const { page } = game;
     check((await page.locator(".overlay svg").count()) >= 1, "start screen shows an SVG mole");
+    check(await page.locator(".start-mole .face-ok").isVisible(), "start mole shows friendly eyes");
+    check(await page.locator(".start-mole .face-hit").isHidden(), "start mole hides the hit face and stars");
     check((await page.locator(".hole").count()) === 6, "six holes");
     await pressPlay(page);
 
@@ -53,6 +55,8 @@ async function whackNext(page) {
         if (n < 10) check((await hits(page)) === n, `level ${level}: hit ${n} counts once`);
         if (level === 1 && n === 1) {
           check((await page.locator(".mole.hit").count()) >= 1, "a whacked mole shows a dizzy face");
+          check(await page.locator(".mole.hit .face-hit").first().isVisible(), "gameplay hit face is visible");
+          check(await page.locator(".mole.hit .face-ok").first().isHidden(), "gameplay hit hides friendly eyes");
           check((await page.locator(".particle").count()) >= 1, "a hit bursts into sparkles");
         }
       }

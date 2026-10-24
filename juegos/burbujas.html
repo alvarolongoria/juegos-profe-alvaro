@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="../assets/common.css" />
     <style>
       body {
-        background: linear-gradient(#7dd3fc, #e0f2fe 70%, #bbf7d0);
+        background: #9ce5ed;
       }
 
       .bubble {
@@ -30,6 +30,19 @@
         opacity: 0;
       }
 
+      .world-art {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      .bubble-look {
+        border: 4px solid #24334b;
+        box-shadow: inset 8px 10px 0 #ffffff90, inset -8px -10px 0 #38bdf844;
+      }
+
       .ground {
         position: fixed;
         bottom: 0;
@@ -42,7 +55,25 @@
     </style>
   </head>
   <body>
-    <div class="ground"></div>
+    <!-- All scenery is inert and precedes the floating targets. -->
+    <svg class="world-art" viewBox="0 0 1366 768" preserveAspectRatio="none" aria-hidden="true">
+      <g stroke="#24334b" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M90 160 Q70 126 109 116 Q120 62 170 91 Q208 78 222 119 Q270 132 242 160Z" fill="#fff9e8"/>
+        <path d="M1010 186 Q980 150 1020 141 Q1040 90 1080 122 Q1120 100 1140 146 Q1186 150 1170 186Z" fill="#fff9e8"/>
+        <circle cx="1220" cy="100" r="48" fill="#ffcc47"/>
+        <path d="M0 485 Q220 345 460 480 Q770 330 1020 460 Q1220 380 1366 440 V768 H0Z" fill="#74c98b"/>
+        <path d="M0 590 Q260 460 500 590 Q850 460 1366 560 V768 H0Z" fill="#42ad83"/>
+        <path d="M0 690 Q330 590 650 680 Q1000 580 1366 666 V768 H0Z" fill="#b7df70"/>
+        <path d="M100 768 V550 M68 585 Q95 540 100 590 Q130 545 139 581 M1250 768 V548 M1218 586 Q1245 542 1250 590 Q1280 548 1290 581" fill="#48ae78"/>
+        <g fill="#ff739e">
+          <path d="M100 554 C25 540 60 485 100 514 C130 470 177 520 132 545 Q130 584 100 554Z"/>
+          <path d="M1250 552 C1175 538 1210 483 1250 512 C1280 468 1327 518 1282 543 Q1280 582 1250 552Z"/>
+        </g>
+        <g fill="#ffcc47"><circle cx="103" cy="535" r="17"/><circle cx="1253" cy="533" r="17"/></g>
+        <ellipse cx="667" cy="737" rx="230" ry="26" fill="#74cbd9"/>
+        <path d="M430 722 Q670 686 904 722" fill="none" stroke="#fff9e8"/>
+      </g>
+    </svg>
     <script src="../assets/common.js"></script>
     <script>
       // Each level makes bubbles smaller, faster and wobblier.

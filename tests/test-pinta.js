@@ -91,8 +91,8 @@ async function paintDrawing(page) {
 
     await page.emulateMedia({ reducedMotion: "reduce" });
     check(
-      await page.locator(".sun").evaluate((el) => getComputedStyle(el).animationName === "none"),
-      "reduced motion stops the spinning sun"
+      await page.locator(".world-art").evaluate((el) => getComputedStyle(el).animationName === "none"),
+      "studio scenery stays still with reduced motion"
     );
     await finish(game);
   } catch (error) {
