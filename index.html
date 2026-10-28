@@ -7,79 +7,120 @@
   <link rel="stylesheet" href="assets/common.css" />
   <style>
     html { overflow-y: auto; }
-    body { height: auto; min-height: 100%; background: #a9e2e5; background-image: radial-gradient(circle at 15% 10%, #fff7dc 0 8%, transparent 8.2%), linear-gradient(155deg, transparent 45%, #b5dbb5 45%); overflow-y: auto; }
-    h1 { margin: 28px 16px 8px; font-size: clamp(30px, 4vw, 50px); color: #24334b; text-align: center; text-shadow: 2px 3px #fff7e4; }
-    .games { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; width: min(1120px, 92vw); margin: auto; padding: 24px 0 48px; }
-    .card { position: relative; display: block; border: 4px solid #24334b; border-radius: 30px; overflow: hidden; background: #fff7e4; box-shadow: 0 8px #24334b; transition: transform .15s; }
-    .card svg { display: block; width: 100%; aspect-ratio: 320 / 210; pointer-events: none; }
-    .card::after { content: ''; position: absolute; right: 15px; bottom: 14px; width: 46px; height: 46px; border: 3px solid #24334b; border-radius: 50%; background: #fff7e4; box-shadow: 0 3px #24334b; }
-    .card::before { content: ''; position: absolute; z-index: 1; right: 30px; bottom: 28px; border-left: 16px solid #24334b; border-top: 10px solid transparent; border-bottom: 10px solid transparent; }
+    body { height: auto; min-height: 100%; display: flex; flex-direction: column; overflow-y: auto; background: #ffda55 radial-gradient(circle at calc(100% - 140px) 72px, #fff7e4 0 100px, transparent 101px) no-repeat; color: #24334b; }
+    .wrap { width: min(1340px, 94vw); margin: 0 auto; }
+    .hello { position: relative; z-index: 2; display: inline-block; margin: 36px 0 0; padding: 14px 28px; border: 4px solid #24334b; border-radius: 30px; background: #fff7e4; box-shadow: 0 6px #24334b; }
+    h1 { margin: 0; font-size: clamp(28px, 3.4vw, 44px); }
+    .hello p { margin: 4px 0 0; font-size: clamp(16px, 1.6vw, 22px); }
+    .games { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin: 22px 0 0; }
+    .card { position: relative; z-index: 5; display: flex; align-items: center; gap: 12px; min-height: 100px; padding: 8px 12px; border: 4px solid #24334b; border-radius: 26px; background: #fff7e4; box-shadow: 0 6px #24334b; font-size: 16px; font-weight: 700; color: #24334b; text-decoration: none; transition: transform .15s; }
+    .card svg { flex: none; width: 60px; height: 60px; border: 3px solid #24334b; border-radius: 16px; pointer-events: none; }
     .card:hover { transform: translateY(-5px); }
     .card:active { transform: translateY(5px); }
-    @media (max-width: 640px) { .games { grid-template-columns: repeat(2, 1fr); gap: 20px; } }
-    @media (prefers-reduced-motion: reduce) { .card { transition: none; } .card:hover { transform: none; } }
+    .card:focus-visible { outline: 5px solid #24334b; outline-offset: 4px; }
+
+    /* Game of the day: one big card in the middle, four small cards on each side. */
+    .games.has-today { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); grid-auto-rows: 100px; }
+    .card.today { grid-column: 2; grid-row: 1 / span 4; display: block; padding: 0; overflow: hidden; border-width: 5px; border-radius: 40px; box-shadow: 0 12px #24334b; background: #34456e; }
+    .card.today svg { width: 100%; height: 100%; border: 0; border-radius: 0; }
+    .card.today .label { position: absolute; top: 86px; left: 50%; transform: translateX(-50%); padding: 6px 20px; border: 4px solid #24334b; border-radius: 30px; background: #fff7e4; box-shadow: 0 4px #24334b; font-size: 28px; font-weight: 800; white-space: nowrap; }
+    .card.today::before { content: "¡Juego de hoy!"; position: absolute; z-index: 1; top: 22px; left: 50%; transform: translateX(-50%); padding: 6px 20px; border: 4px solid #24334b; border-radius: 30px; background: #ffda55; box-shadow: 0 4px #24334b; font-size: 28px; font-weight: 800; white-space: nowrap; }
+    .card.today::after { content: ""; position: absolute; right: 28px; bottom: 24px; width: 96px; height: 96px; border: 5px solid #24334b; border-radius: 50%; background: #55cbd1 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M38 24v52l40-26z' fill='%2324334b'/%3E%3C/svg%3E") center / 100% no-repeat; box-shadow: 0 6px #24334b; }
+    .card:not(.today) .label { white-space: nowrap; }
+
+    .school { margin: auto auto 34px; padding-top: 28px; }
+    .school img { display: block; height: 96px; width: auto; }
+
+    /* Boliche, the mascot: he waits behind a card (cards sit above him) and pops up. */
+    .boliche { position: fixed; left: 0; top: 0; z-index: 3; width: 104px; height: 150px; visibility: hidden; transition: transform .45s cubic-bezier(.3, 1.5, .5, 1); }
+    .boliche svg { display: block; width: 100%; height: 100%; }
+    .say { position: fixed; left: 0; top: 0; z-index: 30; padding: 8px 18px; border: 4px solid #24334b; border-radius: 22px; background: #fff7e4; box-shadow: 0 5px #24334b; font-size: 22px; font-weight: 800; white-space: nowrap; pointer-events: none; opacity: 0; transform: scale(.8); transform-origin: 50% 100%; transition: opacity .2s, transform .25s cubic-bezier(.3, 1.6, .5, 1); }
+    .say.on { opacity: 1; transform: scale(1); }
+    .say::after { content: ""; position: absolute; left: 50%; bottom: -16px; margin-left: -10px; border: 10px solid transparent; border-top: 12px solid #24334b; }
+
+    /* Narrower screens: the game of the day goes on top, the others wrap below it. */
+    @media (max-width: 1279px) { .card:not(.today) .label { white-space: normal; } }
+    @media (max-width: 980px) {
+      .games.has-today { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: auto; }
+      .card.today { grid-column: 1 / -1; grid-row: auto; aspect-ratio: 320 / 210; max-height: 60vh; width: 100%; justify-self: center; }
+    }
+    @media (max-width: 640px) { .card.today .label, .card.today::before { font-size: 20px; } .card.today .label { top: 66px; } .card.today::after { width: 72px; height: 72px; } }
+    @media (prefers-reduced-motion: reduce) { .card, .boliche, .say { transition: none; } .card:hover { transform: none; } }
   </style>
 </head>
 <body>
-  <h1>Juegos del profe Álvaro</h1>
-  <main class="games">
+  <div class="wrap">
+    <header class="hello"><h1>¡Hola! Soy Boliche</h1><p>Hoy te propongo este juego. ¿Jugamos?</p></header>
+    <main class="games">
     <a class="card" href="juegos/estrellas.html" aria-label="Enciende las estrellas">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#34456e" d="M0 0h320v210H0z"/><g fill="#fff7e4"><circle cx="40" cy="40" r="4"/><circle cx="268" cy="34" r="5"/><circle cx="285" cy="105" r="3"/><circle cx="87" cy="21" r="3"/></g>
         <path fill="#7d83bb" d="M0 173Q70 124 146 172T320 155V210H0"/><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path fill="#ffda55" d="m151 30 24 49 54 8-39 38 9 54-48-26-48 26 9-54-39-38 54-8z"/><path fill="none" stroke="#fff7e4" d="M49 80Q14 128 60 150M250 55q40 40 5 75"/></g>
         <g fill="#24334b"><ellipse cx="133" cy="108" rx="5" ry="8"/><ellipse cx="168" cy="108" rx="5" ry="8"/></g><path d="M138 130q13 12 26 0" fill="none" stroke="#24334b" stroke-width="4" stroke-linecap="round"/>
       </svg>
+    <span class="label" aria-hidden="true">Enciende las estrellas</span>
     </a>
     <a class="card" href="juegos/burbujas.html" aria-label="Cazaburbujas">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#8bdbec" d="M0 0h320v210H0z"/><path fill="#f4d59a" d="M0 175q80-35 160 0t160-5v40H0"/>
         <g stroke="#24334b" stroke-width="4"><path fill="#ffbd67" d="m31 130 19-24 20 24-20 30z"/><circle cx="147" cy="93" r="61" fill="#bdeff5"/><circle cx="59" cy="49" r="24" fill="#ecb8eb"/><circle cx="260" cy="82" r="34" fill="#a1ead7"/><path fill="#63ba85" d="M30 208q-20-50 7-57l6 57m30 0q-10-65 13-67l-1 67"/></g>
         <g fill="none" stroke="#fff7e4" stroke-width="9" stroke-linecap="round"><path d="M111 78q5-23 28-26M44 44l6-7M245 71l10-9"/></g><circle cx="167" cy="127" r="9" fill="#fff7e4"/>
       </svg>
+    <span class="label" aria-hidden="true">Cazaburbujas</span>
     </a>
     <a class="card" href="juegos/monstruos.html" aria-label="Fábrica de monstruos">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#b7a5df" d="M0 0h320v210H0z"/><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M0 46h53v70M320 40h-47v65" fill="none" stroke="#fff7e4" stroke-width="15"/><path fill="#67718c" d="M0 166h320v44H0z"/><path fill="#67d5bd" d="M91 159V89q0-51 65-51t65 51v70z"/><path fill="#ffbd67" d="m110 49-13-29 35 20m49 0 31-20-10 33"/><rect x="104" y="72" width="104" height="42" rx="18" fill="#fff7e4"/><path d="M119 134q35 36 72 0z" fill="#f07599"/><path fill="#fff7e4" d="M137 139v12h15v-8"/></g>
         <g fill="#24334b"><circle cx="131" cy="91" r="9"/><circle cx="181" cy="91" r="9"/><circle cx="36" cy="187" r="10"/><circle cx="84" cy="187" r="10"/><circle cx="132" cy="187" r="10"/></g>
       </svg>
+    <span class="label" aria-hidden="true">Fábrica de monstruos</span>
     </a>
     <a class="card" href="juegos/cohete.html" aria-label="Cohete saltarín">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#34456e" d="M0 0h320v210H0z"/><g fill="#ffda55"><path d="m42 38 6 11 13 2-10 9 2 13-11-6-12 6 3-13-10-9 13-2z"/><circle cx="263" cy="30" r="4"/></g>
         <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><ellipse cx="263" cy="91" rx="38" ry="27" fill="#a58bdf"/><path d="m211 107 96-31" stroke="#ffbd67" stroke-width="12"/><path fill="#ffbd67" d="m133 149 19 51 22-51"/><path fill="#ff7865" d="m127 104-30 45h37m39-45 33 45h-38"/><path fill="#fff7e4" d="M128 145V76q0-31 25-51 25 20 25 51v69z"/><path fill="#ff7865" d="M130 65q6-23 23-40 18 17 23 40z"/><circle cx="153" cy="93" r="17" fill="#55cbd1"/></g><path fill="#7183a3" d="M0 196q40-42 82-8l30 22H0"/>
       </svg>
+    <span class="label" aria-hidden="true">Cohete saltarín</span>
     </a>
     <a class="card" href="juegos/piano.html" aria-label="Piano de letras">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#f1b3ce" d="M0 0h320v210H0z"/><path fill="#b481bc" d="M0 0h38v210H0m282-210h38v210h-38"/>
         <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><rect x="48" y="100" width="224" height="88" rx="12" fill="#fff7e4"/><path d="M80 103v81m32-81v81m32-81v81m32-81v81m32-81v81m32-81v81"/><path d="M72 102h16v46H72zm32 0h16v46h-16zm64 0h16v46h-16zm32 0h16v46h-16zm32 0h16v46h-16z" fill="#24334b"/><rect x="126" y="22" width="68" height="62" rx="14" fill="#ffda55"/><path d="m144 68 16-30 16 30m-26-10h20" fill="none"/><path d="M65 64V36l22-6v28m145 12V42l20-7v28" fill="none"/><ellipse cx="59" cy="65" rx="9" ry="6" fill="#55cbd1"/><ellipse cx="226" cy="72" rx="9" ry="6" fill="#55cbd1"/></g>
       </svg>
+    <span class="label" aria-hidden="true">Piano de letras</span>
     </a>
     <a class="card" href="juegos/carrera.html" aria-label="Gran Carrera">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#8bdbec" d="M0 0h320v210H0z"/><path fill="#73be88" d="M0 108q62-60 124-13t196-15v130H0"/><path fill="#66758c" d="M85 210 180 91h40l80 119"/><path d="m199 109-4 23m-8 17-13 27" stroke="#fff7e4" stroke-width="6"/>
         <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M265 101V22"/><path fill="#fff7e4" d="M265 24h44v39h-44z"/><path fill="#24334b" d="M265 24h14v13h-14zm28 0h16v13h-16zm-14 13h14v13h-14zm-14 13h14v13h-14zm28 0h16v13h-16z"/><path fill="#ff7865" d="M62 146h26l21-31h51l25 31h16v31H62z"/><path fill="#bdeff5" d="m104 142 12-20h37l17 20z"/><circle cx="94" cy="176" r="16" fill="#24334b"/><circle cx="175" cy="176" r="16" fill="#24334b"/></g><g fill="#fff7e4"><circle cx="94" cy="176" r="6"/><circle cx="175" cy="176" r="6"/></g>
       </svg>
+    <span class="label" aria-hidden="true">Gran Carrera</span>
     </a>
     <a class="card" href="juegos/hamburgueseria.html" aria-label="La Hamburguesería">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#bde7dc" d="M0 0h320v210H0z"/><path fill="#fff7e4" d="M0 0h320v38H0"/><path d="M20 0v38m56-38v38m56-38v38m56-38v38m56-38v38m56-38v38" stroke="#ff7865" stroke-width="28"/><path fill="#d49a70" d="M0 170h320v40H0"/>
         <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><ellipse cx="150" cy="176" rx="94" ry="15" fill="#fff7e4"/><path fill="#ffbd67" d="M76 112q0-58 75-58t75 58z"/><path d="M79 125q15-17 30 0t30 0 30 0 30 0 27 0" fill="none" stroke="#58ba78" stroke-width="13"/><rect x="80" y="133" width="143" height="20" rx="10" fill="#805047"/><path fill="#ffda55" d="m81 131 36 23 22-23h83z"/><path fill="#ffbd67" d="M78 159h147q0 20-25 20H103q-25 0-25-20z"/></g><path d="m118 83 5-3m25-6 6 1m27 7 6 3" stroke="#fff7e4" stroke-width="5" stroke-linecap="round"/>
       </svg>
+    <span class="label" aria-hidden="true">La Hamburguesería</span>
     </a>
-    <a class="card" href="juegos/topos.html" aria-label="Aplasta Topos">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+    <a class="card" href="juegos/topos.html" aria-label="Atrapa el Topo">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#bde7dc" d="M0 0h320v210H0z"/><path fill="#73be88" d="M0 90q75-30 155 0t165 0v120H0"/>
         <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M0 61h320M22 23v74m47-74v74m47-74v74m47-74v74m47-74v74m47-74v74m47-74v74" stroke="#fff7e4" stroke-width="12"/><ellipse cx="147" cy="177" rx="69" ry="18" fill="#805047"/><path fill="#b98a70" d="M99 173v-47q0-47 48-47t48 47v47"/><circle cx="102" cy="102" r="14" fill="#b98a70"/><circle cx="191" cy="102" r="14" fill="#b98a70"/><ellipse cx="147" cy="140" rx="28" ry="22" fill="#f4d7b6"/><ellipse cx="147" cy="131" rx="10" ry="7" fill="#f07599"/></g><g fill="#24334b"><circle cx="127" cy="117" r="5"/><circle cx="167" cy="117" r="5"/></g><path d="M25 162v-24m-10 11h20m220-25v-24m-10 11h20" stroke="#ffda55" stroke-width="6"/>
       </svg>
+    <span class="label" aria-hidden="true">Atrapa el Topo</span>
     </a>
     <a class="card" href="juegos/pinta.html" aria-label="Pinta el Camino">
-      <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
         <path fill="#ffda83" d="M0 0h320v210H0z"/><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path fill="#b98a70" d="m94 206 42-157h37l40 157m-87-34h60"/><rect x="56" y="25" width="202" height="143" rx="10" fill="#fff7e4"/><path fill="#8bdbec" d="M68 37h178v119H68z"/><path fill="#73be88" d="m68 142 47-49 42 39 38-27 51 32v19H68z"/><circle cx="208" cy="65" r="17" fill="#ffda55"/><path d="m79 156 59-54 42 54z" fill="#ff7865"/><path d="M123 132h29v24h-29z" fill="#fff7e4"/><path d="m249 143 24-75 12 4-23 75" fill="#b98a70"/><path d="m273 68 3-25q28 10 9 29z" fill="#55cbd1"/></g>
       </svg>
+    <span class="label" aria-hidden="true">Pinta el Camino</span>
     </a>
-  </main>
+    </main>
+  </div>
+  <footer class="school"><img src="assets/logo-colegio.png" alt="Colegio San Ramón y San Antonio"></footer>
   <script src="assets/common.js"></script>
-  <script>Juegos.guardRightClick();</script>
+  <script src="assets/portal.js"></script>
+  <script>Juegos.guardRightClick(); Portal.start();</script>
 </body>
 </html>

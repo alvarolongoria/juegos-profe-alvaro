@@ -7,7 +7,7 @@ const games = [
   ['estrellas', 'Enciende las estrellas'], ['burbujas', 'Cazaburbujas'],
   ['monstruos', 'Fábrica de monstruos'], ['cohete', 'Cohete saltarín'],
   ['piano', 'Piano de letras'], ['carrera', 'Gran Carrera'],
-  ['hamburgueseria', 'La Hamburguesería'], ['topos', 'Aplasta Topos'],
+  ['hamburgueseria', 'La Hamburguesería'], ['topos', 'Atrapa el Topo'],
   ['pinta', 'Pinta el Camino'],
 ];
 const sizes = [[1366, 768], [1024, 600]];
