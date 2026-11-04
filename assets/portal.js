@@ -63,8 +63,8 @@ const Portal = (() => {
     // picks one of the free spots, preferring a card it did not use last time.
     function findSpot() {
       const cards = [...document.querySelectorAll("main a.card")];
-      // The greeting and the school logo are never covered by the mascot.
-      const keepClear = [".hello", ".school img"].map(sel => document.querySelector(sel).getBoundingClientRect());
+      // The greeting and the school circle are never covered by the mascot.
+      const keepClear = [".hello", ".school"].map(sel => document.querySelector(sel).getBoundingClientRect());
       const spots = [];
       for (const card of cards) {
         const r = card.getBoundingClientRect();

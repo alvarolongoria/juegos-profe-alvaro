@@ -32,6 +32,14 @@ const { openGame, check, finish } = require('./helpers');
   check(await page.locator('main a').last().getAttribute('href') === 'juegos/pinta.html', 'DOM order keeps Pinta el Camino last');
   check(await page.evaluate(() => document.cookie === '' && localStorage.length === 0), 'portal stores nothing in cookies or localStorage');
   check(await page.getByRole('img', { name: /Colegio San Ramón/ }).count() === 1, 'school logo is present with a text alternative');
+  // The whole school logo sits inside the cream circle in the top corner.
+  check(await page.evaluate(() => {
+    const circle = document.querySelector('.school'), logo = circle && circle.querySelector('img');
+    if (!circle || !logo || getComputedStyle(circle).borderRadius !== '50%') return false;
+    const c = circle.getBoundingClientRect(), l = logo.getBoundingClientRect();
+    const cx = c.left + c.width / 2, cy = c.top + c.height / 2, r = c.width / 2;
+    return [[l.left, l.top], [l.right, l.top], [l.left, l.bottom], [l.right, l.bottom]].every(([x, y]) => Math.hypot(x - cx, y - cy) <= r);
+  }), 'school logo fits inside the corner circle');
 
   // The mascot hides behind a card, pops up, says something and hides again.
   check(await page.locator('.boliche').evaluate(el => getComputedStyle(el).visibility === 'hidden'), 'mascot starts hidden');
@@ -53,9 +61,9 @@ const { openGame, check, finish } = require('./helpers');
     await page.waitForFunction(() => getComputedStyle(document.querySelector('.boliche')).visibility === 'hidden', null, { timeout: 8000 });
     await page.waitForSelector('.say.on', { timeout: 15000 });
     check(await page.evaluate(() => {
-      const a = document.querySelector('.boliche').getBoundingClientRect(), b = document.querySelector('.school img').getBoundingClientRect();
+      const a = document.querySelector('.boliche').getBoundingClientRect(), b = document.querySelector('.school').getBoundingClientRect();
       return a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
-    }), `mascot peek ${peek} leaves the school logo uncovered`);
+    }), `mascot peek ${peek} leaves the school circle uncovered`);
   }
 
   check(ctx.errors.length === 0 && ctx.external.length === 0, 'portal has no errors or external requests');
