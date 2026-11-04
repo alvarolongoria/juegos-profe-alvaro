@@ -75,13 +75,10 @@ async function flyLevel(page, timeoutMs) {
     await page.keyboard.press("a");
     check(await page.locator("#enter-key").evaluate((el) => el.classList.contains("hint")), "wrong key hints ENTER");
 
-    // S1: the rocket no longer stays in one place, it flies sideways on its own.
+    // S1 + S4: the rocket leaves the pad and flies forward, and it never flies backwards.
     await page.keyboard.press("Enter");
     check((await page.locator("#world").getAttribute("data-state")) === "flying", "ENTER starts the flight");
-    const firstX = Number(await page.locator("#rocket").getAttribute("data-x"));
-    await page.waitForTimeout(700);
-    const laterX = Number(await page.locator("#rocket").getAttribute("data-x"));
-    check(Math.abs(laterX - firstX) > 20, `rocket flies sideways by itself (${firstX} -> ${laterX})`);
+    const padX = Number(await page.locator("#rocket").getAttribute("data-x"));
     // S9: the scenery itself scrolls past, not only the thin ground strip.
     const sceneryX = () => page.$$eval("[data-layer]", (layers) => layers.map((l) => Math.round(l.getBoundingClientRect().x)));
     const sceneBefore = await sceneryX();
@@ -89,13 +86,25 @@ async function flyLevel(page, timeoutMs) {
     const sceneAfter = await sceneryX();
     check(sceneBefore.length >= 3, `the scenery is drawn in layers (${sceneBefore.length})`);
     check(sceneBefore.length > 0 && sceneBefore.every((x, i) => sceneAfter[i] < x), `every scenery layer scrolls left (${sceneBefore} -> ${sceneAfter})`);
+    const track = [];
+    for (let i = 0; i < 32; i++) {
+      track.push(Number(await page.locator("#rocket").getAttribute("data-x")));
+      await page.waitForTimeout(250);
+    }
+    const backwards = track.some((x, i) => i > 0 && x < track[i - 1]);
+    const width = await page.locator("#world").evaluate((el) => el.clientWidth);
+    check(track.at(-1) > padX + 60, `rocket flies forward off the pad (${padX} -> ${track.at(-1)})`);
+    check(!backwards, `rocket never flies backwards (${track.join(",")})`);
+    check(track.at(-1) < width * 0.45, `rocket cruises in the left part of the screen (${track.at(-1)} of ${width})`);
+    await page.keyboard.press("x");
+    check(await page.locator("#space-key").evaluate((el) => el.classList.contains("hint")), "wrong flying key hints SPACE");
     await page.keyboard.press("x");
     check(await page.locator("#space-key").evaluate((el) => el.classList.contains("hint")), "wrong flying key hints SPACE");
 
     // S3: hazards arrive; grounded flight also cannot collect a star.
     await page.waitForSelector(".hazard", { timeout: 20000 });
     check(true, "hazards fly in");
-    await page.waitForFunction(() => document.querySelector("#world").dataset.missed === "1", null, { timeout: 25000 });
+    await page.waitForFunction(() => Number(document.querySelector("#world").dataset.missed) >= 1, null, { timeout: 25000 });
     check((await page.locator(".progress span.on").count()) === 0, "grounded flight cannot collect elevated stars");
 
     // S5 + S8: three bumps empty the hearts, restart the level and report the metres.

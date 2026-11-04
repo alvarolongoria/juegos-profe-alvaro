@@ -78,7 +78,6 @@
       ];
       const STARS_PER_LEVEL = 10;
       const ROCKET_W = 86;
-      const MARGIN = 24;
       const PAD_CX = 160;
       // The hop lasts 1.47 s and rises 184 px: long enough to clear anything low.
       const GRAVITY = 680;
@@ -87,8 +86,11 @@
       // Each extra SPACE press in the air adds thrust, like giving the rocket more gas.
       const THRUST = 300;
       const MAX_RISE_SPEED = 650;
-      // The sweep is slower than the flying things, so nothing can "never arrive".
-      const SWEEP_SECONDS = 16; // seconds for one left-to-right flight
+      // After take-off the rocket glides forward to its cruise spot and stays there:
+      // the world flows past it, so the flight always reads left to right.
+      const CRUISE_AT = 0.3; // fraction of the sky width
+      const GLIDE = 1.2; // how quickly the rocket reaches its cruise spot
+      const TILT = 18; // degrees the nose leans forward while flying
       const GAP_SECONDS = 2; // time between two flying things
       const INVULNERABLE_MS = 1300;
       const PIXELS_PER_METRE = 8;
@@ -116,7 +118,7 @@
       Juegos.homeButton();
       Juegos.guardRightClick();
       let level = 0, successes = 0, missed = 0, hops = 0, starSequence = 0;
-      let height = 0, velocity = 0, rocketX = PAD_CX, phase = 0;
+      let height = 0, velocity = 0, rocketX = PAD_CX;
       let lives = 3, distance = 0, record = 0, invulnerableUntil = 0;
       let hazardsBeforeNextStar = 0, cooldown = 0, items = [], lastTime = 0;
       const flashTimers = new Map();
@@ -160,15 +162,6 @@
       // Highest lift that keeps the whole rocket inside the sky.
       function ceiling() {
         return Math.max(MAX_LIFT, world.clientHeight - 140);
-      }
-      function sweep() {
-        const width = world.clientWidth;
-        return { width, mid: width / 2, amp: Math.max(60, (width - 2 * MARGIN - ROCKET_W) / 2) };
-      }
-      // Take off from the pad without a jump: same place, then the sweep starts.
-      function launchPhase() {
-        const { mid, amp } = sweep();
-        return Math.asin(Math.max(-1, Math.min(1, (PAD_CX - mid) / amp)));
       }
       // The rocket flies by itself, so the ground is what moves: that is the flight.
       function nextKind() {
@@ -252,17 +245,16 @@
       }
       function step(dt) {
         const cfg = LEVELS[level];
-        const { mid, amp } = sweep();
-        // Horizontal flight: a slow sweep, so the rocket flies instead of sitting still.
-        phase += (Math.PI / SWEEP_SECONDS) * dt;
-        rocketX = mid + amp * Math.sin(phase);
+        // Horizontal flight: only ever forward, easing into the cruise spot.
+        const cruiseX = Math.max(PAD_CX, world.clientWidth * CRUISE_AT);
+        rocketX += (cruiseX - rocketX) * Math.min(1, GLIDE * dt);
         // Vertical flight: presses push up, gravity brings the rocket back down.
         velocity -= GRAVITY * dt;
         height = Math.max(0, Math.min(ceiling(), height + velocity * dt));
         if (height === 0 && velocity < 0) velocity = 0;
         if (height === ceiling() && velocity > 0) velocity = 0;
         rocket.style.left = `${rocketX - ROCKET_W / 2}px`;
-        rocket.style.transform = `translateY(${-height}px) rotate(${Math.cos(phase) * 10}deg)`;
+        rocket.style.transform = `translateY(${-height}px) rotate(${TILT}deg)`;
         rocket.dataset.height = String(Math.round(height));
         rocket.dataset.x = String(Math.round(rocketX));
         if (performance.now() >= invulnerableUntil) rocket.classList.remove('hurt');
@@ -334,7 +326,6 @@
         if (now === 'ready' && e.key === 'Enter') {
           state('flying');
           pad.hidden = true;
-          phase = launchPhase();
           cooldown = 0;
           Juegos.sound.click();
           spawn(nextKind());
