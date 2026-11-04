@@ -1,4 +1,4 @@
-// Cazaburbujas: left click pops, right click does not, 10 pops end a level.
+// Cazaburbujas: left click pops, right click does not; levels ask for 5, 7, 9 and 12 pops.
 const { openGame, pressPlay, check, finish } = require("./helpers");
 
 async function popUntilOverlay(page) {
@@ -27,16 +27,20 @@ async function popUntilOverlay(page) {
   await page.mouse.click(first.x + first.width / 2, first.y + first.height / 2, { button: "right" });
   check((await page.locator(".progress span.on").count()) === 0, "right click does not pop a bubble");
 
+  // Each level is longer than the one before, while bubbles get smaller.
+  const goals = [5, 7, 9, 12];
   const sizes = [];
-  for (let level = 1; level <= 2; level++) {
+  for (let level = 1; level <= goals.length; level++) {
+    const goal = goals[level - 1];
+    check((await page.locator(".progress span").count()) === goal, `level ${level}: asks for ${goal} pops (${await page.locator(".progress span").count()})`);
     await page.waitForSelector(".bubble:not(.popping)");
     sizes.push(await page.locator(".bubble:not(.popping)").first().evaluate((el) => el.offsetWidth));
     await popUntilOverlay(page);
-    check((await page.locator(".progress span.on").count()) === 10, `level ${level}: 10 stars lit`);
+    check((await page.locator(".progress span.on").count()) === goal, `level ${level}: ${goal} stars lit`);
     check((await page.locator(".medals").textContent()).length >= level, `level ${level}: medal awarded`);
     await pressPlay(page);
   }
-  check(sizes[1] < sizes[0], `bubbles get smaller (${sizes.join(" -> ")})`);
+  check(sizes.every((size, i) => i === 0 || size < sizes[i - 1]), `bubbles get smaller every level (${sizes.join(" -> ")})`);
 
   await finish(game);
 })();

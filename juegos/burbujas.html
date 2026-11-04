@@ -76,18 +76,18 @@
     </svg>
     <script src="../assets/common.js"></script>
     <script>
-      // Each level makes bubbles smaller, faster and wobblier.
+      // Each level is longer and harder: more pops to reach, and bubbles that are
+      // smaller, faster and wobblier.
       const LEVELS = [
-        { size: 170, speed: 45, max: 3, wobble: 0 },
-        { size: 135, speed: 65, max: 4, wobble: 25 },
-        { size: 105, speed: 85, max: 5, wobble: 40 },
-        { size: 80, speed: 105, max: 6, wobble: 55 },
+        { pops: 5, size: 170, speed: 45, max: 3, wobble: 0 },
+        { pops: 7, size: 135, speed: 65, max: 4, wobble: 25 },
+        { pops: 9, size: 105, speed: 85, max: 5, wobble: 40 },
+        { pops: 12, size: 80, speed: 105, max: 6, wobble: 55 },
       ];
-      const POPS_PER_LEVEL = 10;
       const SPAWN_EVERY = 0.8; // seconds
       const INSIDE = ["", "", "🐟", "🦋", "⭐", "🐞", "🍓", "🌸"];
 
-      const progress = Juegos.progress(POPS_PER_LEVEL);
+      let progress = null;
       const medals = Juegos.medals();
       Juegos.homeButton();
       Juegos.guardRightClick();
@@ -145,7 +145,7 @@
 
         pops += 1;
         progress.set(pops);
-        if (pops >= POPS_PER_LEVEL) finishLevel();
+        if (pops >= LEVELS[level].pops) finishLevel();
       }
 
       async function finishLevel() {
@@ -161,7 +161,9 @@
 
       function startLevel() {
         pops = 0;
-        progress.set(0);
+        // The shared star bar has a fixed size, so each level gets a fresh one.
+        document.querySelector(".progress")?.remove();
+        progress = Juegos.progress(LEVELS[level].pops);
         sinceSpawn = SPAWN_EVERY;
         playing = true;
       }
