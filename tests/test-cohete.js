@@ -70,6 +70,11 @@ async function flyLevel(page, timeoutMs) {
     await pressPlay(page);
     check((await page.locator("#world").getAttribute("data-state")) === "ready", "the start screen leaves the rocket on the pad");
     check((await page.locator("#lives span").count()) === 3, "three hearts before the flight");
+    // S11: each level asks for more stars, flies faster and brings more hazards.
+    const goal = () => page.locator(".progress span").count();
+    const speed = async () => Number(await page.locator("#world").getAttribute("data-speed"));
+    check((await goal()) === 5, `level one asks for five stars (${await goal()})`);
+    const speeds = [await speed()];
     await page.keyboard.press("Space");
     check((await page.locator("#world").getAttribute("data-state")) === "ready", "SPACE before ENTER does not launch");
     await page.keyboard.press("a");
@@ -124,7 +129,7 @@ async function flyLevel(page, timeoutMs) {
     await page.keyboard.press("Enter");
     const won = await flyLevel(page, 180000);
     check(won !== null, "the level can be finished");
-    check(won && won.stars === 10, "ten caught stars finish the level");
+    check(won && won.stars === 5, `five caught stars finish level one (${won && won.stars})`);
     check(won && won.overlay.emoji.includes("🎉"), "finishing the level celebrates");
     check(won && /Has volado \d+ metros · Récord: \d+ metros/.test(won.overlay.text), `the level end reports metres and the record (${won && won.overlay.text})`);
     const shownMetres = Number((won && won.overlay.text.match(/Has volado (\d+) metros/) || [])[1]);
@@ -135,6 +140,8 @@ async function flyLevel(page, timeoutMs) {
     // S2 + S6: the next level flies higher and adds UFOs.
     await pressPlay(page);
     check((await page.locator("#world").getAttribute("data-state")) === "ready", "level two waits on the pad");
+    check((await goal()) === 7, `level two asks for seven stars (${await goal()})`);
+    speeds.push(await speed());
     await page.keyboard.press("Enter");
     await page.waitForSelector(".star", { timeout: 15000 });
     const firstHeight = Number(await page.locator(".star").first().getAttribute("data-height"));
@@ -169,6 +176,22 @@ async function flyLevel(page, timeoutMs) {
     await page.waitForSelector('.hazard[data-kind="ufo"]', { timeout: 30000 });
     check(true, "level two adds UFOs");
     check(await page.evaluate(() => window.scrollY === 0), "holding SPACE never scrolls the page");
+
+    // S11: play on through levels two and three to see the progression grow.
+    const level2 = await flyLevel(page, 240000);
+    check(level2 && level2.stars === 7 && level2.overlay.emoji.includes("🎉"), `seven caught stars finish level two (${level2 && level2.stars})`);
+    await pressPlay(page);
+    check((await goal()) === 9, `level three asks for nine stars (${await goal()})`);
+    speeds.push(await speed());
+    await page.keyboard.press("Enter");
+    await page.waitForSelector('.hazard[data-kind="ship"]', { timeout: 30000 });
+    check(true, "level three adds ships");
+    const level3 = await flyLevel(page, 300000);
+    check(level3 && level3.stars === 9 && level3.overlay.emoji.includes("🎉"), `nine caught stars finish level three (${level3 && level3.stars})`);
+    await pressPlay(page);
+    check((await goal()) === 12, `level four asks for twelve stars (${await goal()})`);
+    speeds.push(await speed());
+    check(speeds.every((v, i) => i === 0 || v > speeds[i - 1]), `every level flies faster (${speeds.join(" < ")})`);
 
     if (await page.locator(".overlay").count()) await pressPlay(page);
     await finish(game);

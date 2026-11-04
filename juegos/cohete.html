@@ -68,15 +68,16 @@
     <div id="space-key" class="key" aria-label="Barra espaciadora"></div>
     <script src="../assets/common.js"></script>
     <script>
-      // Level order follows the plan agreed with the user: meteors first, then UFOs, then ships.
+      // Each level is longer and harder than the one before: more stars to catch,
+      // a faster flight, more hazards between two stars and less time between things.
+      // A hop lasts 1.47 s, so the gap stays long enough to land and hop again.
       // Heights are lifts above the ground: high enough to fly over the mountain scenery.
       const LEVELS = [
-        { speed: 250, heights: [120], hazards: ['meteor'] },
-        { speed: 250, heights: [165], hazards: ['meteor', 'ufo'] },
-        { speed: 285, heights: [165], hazards: ['meteor', 'ufo', 'ship'] },
-        { speed: 315, heights: [120, 180, 145, 165], hazards: ['meteor', 'ufo', 'ship'] },
+        { stars: 5, speed: 230, gap: 2.2, between: 1, heights: [120], hazards: ['meteor'] },
+        { stars: 7, speed: 260, gap: 2.0, between: 1, heights: [165], hazards: ['meteor', 'ufo'] },
+        { stars: 9, speed: 290, gap: 1.85, between: 2, heights: [165], hazards: ['meteor', 'ufo', 'ship'] },
+        { stars: 12, speed: 320, gap: 1.7, between: 2, heights: [120, 180, 145, 165], hazards: ['meteor', 'ufo', 'ship'] },
       ];
-      const STARS_PER_LEVEL = 10;
       const ROCKET_W = 86;
       const PAD_CX = 160;
       // The hop lasts 1.47 s and rises 184 px: long enough to clear anything low.
@@ -91,7 +92,6 @@
       const CRUISE_AT = 0.3; // fraction of the sky width
       const GLIDE = 1.2; // how quickly the rocket reaches its cruise spot
       const TILT = 18; // degrees the nose leans forward while flying
-      const GAP_SECONDS = 2; // time between two flying things
       const INVULNERABLE_MS = 1300;
       const PIXELS_PER_METRE = 8;
       const HIT_X = 55; // horizontal tolerance of a bump, in pixels
@@ -113,7 +113,7 @@
       const livesBox = document.querySelector('#lives');
       const enterKey = document.querySelector('#enter-key');
       const spaceKey = document.querySelector('#space-key');
-      const progress = Juegos.progress(STARS_PER_LEVEL);
+      let progress = null;
       const medals = Juegos.medals();
       Juegos.homeButton();
       Juegos.guardRightClick();
@@ -169,7 +169,7 @@
           hazardsBeforeNextStar--;
           return Juegos.pick(LEVELS[level].hazards);
         }
-        hazardsBeforeNextStar = level < 2 ? 1 : 2;
+        hazardsBeforeNextStar = LEVELS[level].between;
         return 'star';
       }
       function place(item) {
@@ -210,7 +210,7 @@
         Juegos.sound.star();
         Juegos.burst(box.x + box.width / 2, box.y + box.height / 2, '✨');
         progress.set(++successes);
-        if (successes === STARS_PER_LEVEL) endLevel(true);
+        if (successes === LEVELS[level].stars) endLevel(true);
       }
       function takeHit(item) {
         if (performance.now() < invulnerableUntil) return;
@@ -264,7 +264,7 @@
         renderScenery();
         world.dataset.distance = String(metres());
         cooldown += dt;
-        if (cooldown >= GAP_SECONDS) {
+        if (cooldown >= cfg.gap) {
           cooldown = 0;
           spawn(nextKind());
         }
@@ -303,7 +303,9 @@
         cooldown = 0;
         items.forEach(item => item.el.remove());
         items = [];
-        progress.set(0);
+        // The shared star bar has a fixed size, so each level gets a fresh one.
+        document.querySelector('.progress')?.remove();
+        progress = Juegos.progress(LEVELS[level].stars);
         world.dataset.missed = '0';
         world.dataset.lives = '3';
         world.dataset.distance = '0';
