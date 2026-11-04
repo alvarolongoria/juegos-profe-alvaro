@@ -7,7 +7,11 @@
     <link rel="stylesheet" href="../assets/common.css" />
     <style>
       body { background: #25366b; }
-      .space-scene { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+      /* Repeating layers hold two copies side by side, so the scroll can wrap without a seam. */
+      .layer { position: absolute; top: 0; bottom: 0; left: 0; width: 200%; display: flex; pointer-events: none; will-change: transform; }
+      .layer svg { flex: none; width: 50%; height: 100%; }
+      .layer.launch { width: 100%; }
+      .layer.launch svg { width: 100%; }
       #rocket svg, .star svg, .hazard svg { width: 100%; height: 100%; pointer-events: none; }
       #rocket { filter: drop-shadow(0 5px 0 #151f4680); }
       #land { border-color: #24334b !important; background: repeating-linear-gradient(90deg, #ffcc58 0 45px, #ca8753 45px 90px) !important; }
@@ -40,23 +44,20 @@
   </head>
   <body>
     <div id="world" data-state="start" data-missed="0" data-lives="3" data-distance="0" data-record="0" aria-label="Cielo del cohete">
-      <svg class="space-scene" viewBox="0 0 1366 528" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-        <g fill="#fff0cf"><circle cx="85" cy="65" r="3"/><circle cx="340" cy="120" r="4"/><circle cx="660" cy="40" r="3"/><circle cx="860" cy="190" r="3"/><circle cx="1280" cy="100" r="4"/><path d="m510 55 4 12 12 4-12 4-4 12-4-12-12-4 12-4zm430 30 4 12 12 4-12 4-4 12-4-12-12-4 12-4z"/></g>
-        <g stroke="#24334b" stroke-width="7" stroke-linejoin="round">
-          <circle cx="1110" cy="105" r="65" fill="#ffbf69"/>
-          <path d="M1002 142q110-100 216-88M1002 142q120 20 216-88" fill="none" stroke="#ad9df0" stroke-width="17"/>
-          <path d="m0 400 145-88 140 90 135-49 205 80 170-65 200 51 142-96 229 77v128H0z" fill="#5267a1"/>
-          <path d="m0 463 218-57 202 70 230-49 215 43 255-80 246 59v79H0z" fill="#8297bd"/>
-          <path d="M35 490V220h90v270M35 250h90m-90 60h90m-90 60h90m-90 60h90M35 220l90 90m-90 0 90 60m-90 0 90 60" fill="none" stroke="#ffbf69"/>
-          <path d="M125 250h105v25H125z" fill="#fff0cf"/>
-          <path d="M1030 494v-75q0-80 105-80t105 80v75" fill="#63c8c3"/>
-          <path d="M1080 495v-61h110v61" fill="#24334b"/>
-          <path d="M1135 338v-45m-35 0h70" fill="none"/>
-          <circle cx="1135" cy="285" r="12" fill="#fb7d83"/>
-          <path d="M970 494h330" stroke="#fff0cf"/>
-          <ellipse cx="760" cy="500" rx="62" ry="10" fill="#5267a1"/>
-        </g>
-      </svg>
+      <!-- Scenery in parallax layers: the farther a layer, the slower it scrolls. -->
+      <div class="layer" data-layer="sky" data-speed="0.06" aria-hidden="true">
+        <svg viewBox="0 0 1366 528" preserveAspectRatio="xMidYMin slice"><g fill="#fff0cf"><circle cx="85" cy="65" r="3"/><circle cx="340" cy="120" r="4"/><circle cx="660" cy="40" r="3"/><circle cx="860" cy="190" r="3"/><circle cx="1280" cy="100" r="4"/><path d="m510 55 4 12 12 4-12 4-4 12-4-12-12-4 12-4zm430 30 4 12 12 4-12 4-4 12-4-12-12-4 12-4z"/></g><g stroke="#24334b" stroke-width="7" stroke-linejoin="round"><circle cx="1110" cy="105" r="65" fill="#ffbf69"/><path d="M1002 142q110-100 216-88M1002 142q120 20 216-88" fill="none" stroke="#ad9df0" stroke-width="17"/></g></svg>
+      </div>
+      <div class="layer" data-layer="mountains" data-speed="0.2" aria-hidden="true">
+        <svg viewBox="0 0 1366 528" preserveAspectRatio="xMidYMax slice"><path d="m0 400 145-88 140 90 135-49 205 80 170-65 200 51 142-96 229 77v128H0z" fill="#5267a1"/><path d="m0 400 145-88 140 90 135-49 205 80 170-65 200 51 142-96 229 77" fill="none" stroke="#24334b" stroke-width="7" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="layer" data-layer="hills" data-speed="0.5" aria-hidden="true">
+        <svg viewBox="0 0 1366 528" preserveAspectRatio="xMidYMax slice"><path d="m0 463 218-57 202 70 230-49 215 43 255-80 246 73v79H0z" fill="#8297bd"/><g stroke="#24334b" stroke-width="7" stroke-linejoin="round"><path d="m0 463 218-57 202 70 230-49 215 43 255-80 246 73" fill="none"/><path d="M1030 494v-75q0-80 105-80t105 80v75" fill="#63c8c3"/><path d="M1080 495v-61h110v61" fill="#24334b"/><path d="M1135 338v-45m-35 0h70" fill="none"/><circle cx="1135" cy="285" r="12" fill="#fb7d83"/><path d="M970 494h330" stroke="#fff0cf"/><ellipse cx="760" cy="500" rx="62" ry="10" fill="#5267a1"/></g></svg>
+      </div>
+      <!-- The launch tower is not repeated: it stays behind once the rocket takes off. -->
+      <div class="layer launch" data-layer="launch" data-speed="1" aria-hidden="true">
+        <svg viewBox="0 0 1366 528" preserveAspectRatio="xMidYMax slice"><g stroke="#24334b" stroke-width="7" stroke-linejoin="round"><path d="M35 490V220h90v270M35 250h90m-90 60h90m-90 60h90m-90 60h90M35 220l90 90m-90 0 90 60m-90 0 90 60" fill="none" stroke="#ffbf69"/><path d="M125 250h105v25H125z" fill="#fff0cf"/></g></svg>
+      </div>
       <div id="land" aria-hidden="true"></div><div id="pad" aria-hidden="true"></div>
       <div id="rocket" data-height="0" data-hops="0" data-x="160" aria-label="Cohete">
         <svg viewBox="0 0 100 100" aria-hidden="true"><g stroke="#24334b" stroke-width="5" stroke-linejoin="round"><path d="m26 65-15 22 28-8m35-14 15 22-28-8" fill="#fb7d83"/><path d="M37 78 50 98l13-20" fill="#ffcc58"/><path d="M28 74Q22 30 50 5q28 25 22 69Z" fill="#fff5da"/><path d="M32 29 50 5l18 24Z" fill="#fb7d83"/><circle cx="50" cy="49" r="14" fill="#63c8e0"/><path d="M31 73h38" stroke="#ad9df0" stroke-width="9"/></g></svg>
@@ -83,6 +84,9 @@
       const GRAVITY = 680;
       const JUMP = 500;
       const MAX_LIFT = 184;
+      // Each extra SPACE press in the air adds thrust, like giving the rocket more gas.
+      const THRUST = 300;
+      const MAX_RISE_SPEED = 650;
       // The sweep is slower than the flying things, so nothing can "never arrive".
       const SWEEP_SECONDS = 16; // seconds for one left-to-right flight
       const GAP_SECONDS = 2; // time between two flying things
@@ -116,6 +120,11 @@
       let lives = 3, distance = 0, record = 0, invulnerableUntil = 0;
       let hazardsBeforeNextStar = 0, cooldown = 0, items = [], lastTime = 0;
       const flashTimers = new Map();
+      const layers = [...document.querySelectorAll('[data-layer]')].map(el => {
+        // A second copy right after the first lets a repeating layer wrap seamlessly.
+        if (!el.classList.contains('launch')) el.append(el.firstElementChild.cloneNode(true));
+        return { el, speed: Number(el.dataset.speed), repeats: !el.classList.contains('launch') };
+      });
 
       // Local helper: keycap feedback also remains visible with reduced motion.
       function flash(key, className) {
@@ -140,6 +149,17 @@
           if (i >= lives) heart.className = 'lost';
           livesBox.append(heart);
         }
+      }
+      function renderScenery() {
+        const width = world.clientWidth;
+        for (const layer of layers) {
+          const offset = distance * layer.speed;
+          layer.el.style.transform = `translateX(${-(layer.repeats ? offset % width : offset)}px)`;
+        }
+      }
+      // Highest lift that keeps the whole rocket inside the sky.
+      function ceiling() {
+        return Math.max(MAX_LIFT, world.clientHeight - 140);
       }
       function sweep() {
         const width = world.clientWidth;
@@ -236,10 +256,11 @@
         // Horizontal flight: a slow sweep, so the rocket flies instead of sitting still.
         phase += (Math.PI / SWEEP_SECONDS) * dt;
         rocketX = mid + amp * Math.sin(phase);
-        // Vertical flight: one hop per press, gravity brings the rocket back down.
+        // Vertical flight: presses push up, gravity brings the rocket back down.
         velocity -= GRAVITY * dt;
-        height = Math.max(0, Math.min(MAX_LIFT, height + velocity * dt));
+        height = Math.max(0, Math.min(ceiling(), height + velocity * dt));
         if (height === 0 && velocity < 0) velocity = 0;
+        if (height === ceiling() && velocity > 0) velocity = 0;
         rocket.style.left = `${rocketX - ROCKET_W / 2}px`;
         rocket.style.transform = `translateY(${-height}px) rotate(${Math.cos(phase) * 10}deg)`;
         rocket.dataset.height = String(Math.round(height));
@@ -248,6 +269,7 @@
         // The ground scrolls, and its scroll is the distance flown.
         distance += cfg.speed * dt;
         land.style.backgroundPositionX = `${-distance}px`;
+        renderScenery();
         world.dataset.distance = String(metres());
         cooldown += dt;
         if (cooldown >= GAP_SECONDS) {
@@ -298,6 +320,7 @@
         rocket.dataset.hops = '0';
         rocket.classList.remove('hurt');
         renderLives();
+        renderScenery();
         rocketX = PAD_CX;
         rocket.style.left = `${PAD_CX - ROCKET_W / 2}px`;
         rocket.style.transform = 'translateY(0) rotate(0deg)';
@@ -316,9 +339,9 @@
           Juegos.sound.click();
           spawn(nextKind());
         } else if (now === 'flying' && e.code === 'Space') {
-          // One hop per landing: holding the key can never make the rocket hover.
-          if (height > 0 || velocity > 0) return;
-          velocity = JUMP;
+          // A hop from the ground, extra gas in the air. Holding the key is one push only,
+          // because auto-repeated keydowns are ignored above.
+          velocity = height === 0 ? JUMP : Math.min(MAX_RISE_SPEED, Math.max(velocity, 0) + THRUST);
           rocket.dataset.hops = String(++hops);
           flash(spaceKey, 'lit');
           Juegos.sound.click();

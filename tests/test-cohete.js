@@ -82,6 +82,13 @@ async function flyLevel(page, timeoutMs) {
     await page.waitForTimeout(700);
     const laterX = Number(await page.locator("#rocket").getAttribute("data-x"));
     check(Math.abs(laterX - firstX) > 20, `rocket flies sideways by itself (${firstX} -> ${laterX})`);
+    // S9: the scenery itself scrolls past, not only the thin ground strip.
+    const sceneryX = () => page.$$eval("[data-layer]", (layers) => layers.map((l) => Math.round(l.getBoundingClientRect().x)));
+    const sceneBefore = await sceneryX();
+    await page.waitForTimeout(600);
+    const sceneAfter = await sceneryX();
+    check(sceneBefore.length >= 3, `the scenery is drawn in layers (${sceneBefore.length})`);
+    check(sceneBefore.length > 0 && sceneBefore.every((x, i) => sceneAfter[i] < x), `every scenery layer scrolls left (${sceneBefore} -> ${sceneAfter})`);
     await page.keyboard.press("x");
     check(await page.locator("#space-key").evaluate((el) => el.classList.contains("hint")), "wrong flying key hints SPACE");
 
@@ -123,12 +130,32 @@ async function flyLevel(page, timeoutMs) {
     await page.waitForSelector(".star", { timeout: 15000 });
     const firstHeight = Number(await page.locator(".star").first().getAttribute("data-height"));
     check(firstHeight > 120, `level two stars fly higher (${firstHeight})`);
+    // S10: each new SPACE press gives more thrust, so tapping climbs higher than one hop.
+    const peak = async () => {
+      let top = 0;
+      const until = Date.now() + 1600;
+      while (Date.now() < until) top = Math.max(top, Number(await page.locator("#rocket").getAttribute("data-height")));
+      return top;
+    };
+    await page.waitForFunction(() => document.querySelector("#rocket").dataset.height === "0");
     const hopsBefore = Number(await page.locator("#rocket").getAttribute("data-hops"));
     await page.keyboard.press("Space");
-    const hopsAfter = Number(await page.locator("#rocket").getAttribute("data-hops"));
-    check(hopsAfter === hopsBefore + 1, "SPACE hops once");
+    check(Number(await page.locator("#rocket").getAttribute("data-hops")) === hopsBefore + 1, "SPACE hops once");
+    const singlePeak = await peak();
+    await page.waitForFunction(() => document.querySelector("#rocket").dataset.height === "0", null, { timeout: 5000 });
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(250);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(250);
+    await page.keyboard.press("Space");
+    const boostedPeak = await peak();
+    check(Number(await page.locator("#rocket").getAttribute("data-hops")) === hopsBefore + 4, "every SPACE press in the air counts as thrust");
+    check(boostedPeak > singlePeak + 60, `tapping SPACE climbs higher than one hop (${singlePeak} -> ${boostedPeak})`);
+    check(await page.evaluate(() => { const r = document.querySelector("#rocket").getBoundingClientRect(), w = document.querySelector("#world").getBoundingClientRect(); return r.top >= w.top; }), "the rocket never leaves the sky");
+    const hopsHeld = Number(await page.locator("#rocket").getAttribute("data-hops"));
     await page.keyboard.down("Space");
-    check(Number(await page.locator("#rocket").getAttribute("data-hops")) === hopsAfter, "SPACE in the air adds no hop");
+    await page.keyboard.down("Space");
+    check(Number(await page.locator("#rocket").getAttribute("data-hops")) === hopsHeld + 1, "holding SPACE gives one push, not a hover");
     await page.keyboard.up("Space");
     await page.waitForSelector('.hazard[data-kind="ufo"]', { timeout: 30000 });
     check(true, "level two adds UFOs");
