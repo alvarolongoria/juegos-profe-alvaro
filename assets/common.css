@@ -129,6 +129,15 @@ img {
   animation: bounce 1s ease-in-out infinite;
 }
 
+/* Optional result line, used by games that report a score. */
+.overlay .overlay-text {
+  font-size: 38px;
+  font-weight: 700;
+  color: #24334b;
+  text-align: center;
+  padding: 0 24px;
+}
+
 .play-btn {
   width: 200px;
   height: 200px;

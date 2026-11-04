@@ -8,19 +8,25 @@
     <style>
       body { background: #25366b; }
       .space-scene { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-      #land, #pad { pointer-events: none; }
-      #rocket svg, .star svg { width: 100%; height: 100%; pointer-events: none; }
+      #rocket svg, .star svg, .hazard svg { width: 100%; height: 100%; pointer-events: none; }
       #rocket { filter: drop-shadow(0 5px 0 #151f4680); }
       #land { border-color: #24334b !important; background: repeating-linear-gradient(90deg, #ffcc58 0 45px, #ca8753 45px 90px) !important; }
       #pad { border: 4px solid #24334b; background: #fff0cf !important; }
       .key.key { border-color: #24334b; background: #fff5da; box-shadow: 0 8px #142341; }
       .key.key.lit, .key.key.hint { background: #ffcc58; }
       .key.key.active, .key.key.hint { border-color: #ffcc58; }
+      /* Hearts: how many bumps the rocket can still take in this level. */
+      #lives { position: fixed; top: 20px; left: 112px; z-index: 40; display: flex; gap: 2px; padding: 6px 12px; border: 3px solid #24334b; border-radius: 40px; background: #fff7e4; box-shadow: 0 4px #24334b; font-size: 26px; line-height: 1.2; }
+      #lives span.lost { filter: grayscale(1) opacity(0.3); transform: scale(0.8); }
       #world { position: fixed; inset: 110px 0 130px; overflow: hidden; }
       #land { position: absolute; bottom: 0; width: 100%; height: 24px; background: repeating-linear-gradient(90deg, #a5b4fc 0 45px, #6366f1 45px 90px); border-top: 5px solid #e0e7ff; }
       #pad { position: absolute; bottom: 24px; left: 95px; width: 130px; height: 15px; border-radius: 10px; background: #cbd5e1; }
-      #rocket { position: absolute; width: 86px; height: 86px; font-size: 72px; line-height: 86px; text-align: center; left: 120px; bottom: 35px; }
-      .star { position: absolute; width: 60px; height: 60px; font-size: 52px; line-height: 60px; text-align: center; }
+      #rocket { position: absolute; width: 86px; height: 86px; left: 120px; bottom: 35px; }
+      /* While it cannot be hurt, the rocket blinks so the free moment is obvious. */
+      #rocket.hurt { animation: blink 0.22s steps(1) infinite; }
+      @keyframes blink { 50% { opacity: 0.25; } }
+      .star, .hazard { position: absolute; width: 60px; height: 60px; }
+      .hazard { width: 64px; height: 64px; }
       .key { position: fixed; bottom: 24px; height: 85px; background: #fff; color: #1e293b; border: 5px solid #cbd5e1; border-radius: 18px; box-shadow: 0 8px #64748b; display: flex; justify-content: center; align-items: center; font-size: 32px; font-weight: bold; }
       #enter-key { left: calc(50% - 250px); width: 180px; }
       #space-key { left: calc(50% - 35px); width: 300px; }
@@ -33,7 +39,7 @@
     </style>
   </head>
   <body>
-    <div id="world" data-state="start" data-missed="0" aria-label="Cielo del cohete">
+    <div id="world" data-state="start" data-missed="0" data-lives="3" data-distance="0" data-record="0" aria-label="Cielo del cohete">
       <svg class="space-scene" viewBox="0 0 1366 528" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
         <g fill="#fff0cf"><circle cx="85" cy="65" r="3"/><circle cx="340" cy="120" r="4"/><circle cx="660" cy="40" r="3"/><circle cx="860" cy="190" r="3"/><circle cx="1280" cy="100" r="4"/><path d="m510 55 4 12 12 4-12 4-4 12-4-12-12-4 12-4zm430 30 4 12 12 4-12 4-4 12-4-12-12-4 12-4z"/></g>
         <g stroke="#24334b" stroke-width="7" stroke-linejoin="round">
@@ -52,32 +58,63 @@
         </g>
       </svg>
       <div id="land" aria-hidden="true"></div><div id="pad" aria-hidden="true"></div>
-      <div id="rocket" data-height="0" data-hops="0" aria-label="Cohete">
+      <div id="rocket" data-height="0" data-hops="0" data-x="160" aria-label="Cohete">
         <svg viewBox="0 0 100 100" aria-hidden="true"><g stroke="#24334b" stroke-width="5" stroke-linejoin="round"><path d="m26 65-15 22 28-8m35-14 15 22-28-8" fill="#fb7d83"/><path d="M37 78 50 98l13-20" fill="#ffcc58"/><path d="M28 74Q22 30 50 5q28 25 22 69Z" fill="#fff5da"/><path d="M32 29 50 5l18 24Z" fill="#fb7d83"/><circle cx="50" cy="49" r="14" fill="#63c8e0"/><path d="M31 73h38" stroke="#ad9df0" stroke-width="9"/></g></svg>
       </div>
     </div>
+    <div id="lives" aria-label="Vidas"></div>
     <div id="enter-key" class="key" aria-label="Tecla Enter">ENTER</div>
     <div id="space-key" class="key" aria-label="Barra espaciadora"></div>
     <script src="../assets/common.js"></script>
     <script>
+      // Level order follows the plan agreed with the user: meteors first, then UFOs, then ships.
+      // Heights are lifts above the ground: high enough to fly over the mountain scenery.
       const LEVELS = [
-        { speed: 230, heights: [95] },
-        { speed: 230, heights: [150] },
-        { speed: 280, heights: [150] },
-        { speed: 310, heights: [95, 160, 120, 150] },
+        { speed: 250, heights: [120], hazards: ['meteor'] },
+        { speed: 250, heights: [165], hazards: ['meteor', 'ufo'] },
+        { speed: 285, heights: [165], hazards: ['meteor', 'ufo', 'ship'] },
+        { speed: 315, heights: [120, 180, 145, 165], hazards: ['meteor', 'ufo', 'ship'] },
       ];
+      const STARS_PER_LEVEL = 10;
+      const ROCKET_W = 86;
+      const MARGIN = 24;
+      const PAD_CX = 160;
+      // The hop lasts 1.47 s and rises 184 px: long enough to clear anything low.
+      const GRAVITY = 680;
+      const JUMP = 500;
+      const MAX_LIFT = 184;
+      // The sweep is slower than the flying things, so nothing can "never arrive".
+      const SWEEP_SECONDS = 16; // seconds for one left-to-right flight
+      const GAP_SECONDS = 2; // time between two flying things
+      const INVULNERABLE_MS = 1300;
+      const PIXELS_PER_METRE = 8;
+      const HIT_X = 55; // horizontal tolerance of a bump, in pixels
+      const HIT_Y = 55; // vertical tolerance of a bump, in pixels
+      const STAR_SVG = '<svg viewBox="0 0 60 60" aria-hidden="true"><path d="m30 4 8 16 18 3-13 13 3 19-16-9-16 9 3-19L4 23l18-3z" fill="#ffcc58" stroke="#24334b" stroke-width="4" stroke-linejoin="round"/><path d="m26 18-5 9" stroke="#fff5da" stroke-width="4" stroke-linecap="round"/></svg>';
+      // Each hazard flies at a fixed height: low ones must be jumped, the UFO must be avoided.
+      const HAZARDS = {
+        meteor: { label: 'Meteorito', lift: 15, svg: '<svg viewBox="0 0 64 64" aria-hidden="true"><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M44 28 62 16l-8 16 10 8-20 4z" fill="#ffbf69"/><path d="M12 34 14 22 24 13 36 16 44 26 42 39 31 47 19 44z" fill="#9aa7b8"/></g><g fill="#77859a"><circle cx="22" cy="26" r="4"/><circle cx="32" cy="37" r="3"/><circle cx="17" cy="37" r="2.5"/></g></svg>' },
+
+
+        // The enemy ship borrows the player's rocket shape, tinted purple, so it reads as a ship.
+        ship: { label: 'Nave', lift: 35, svg: '<svg viewBox="0 0 100 100" aria-hidden="true"><g transform="rotate(-90 50 50)" stroke="#24334b" stroke-width="5" stroke-linejoin="round"><path d="m26 65-15 22 28-8m35-14 15 22-28-8" fill="#ad9df0"/><path d="M37 78 50 98l13-20" fill="#fb7d83"/><path d="M28 74Q22 30 50 5q28 25 22 69Z" fill="#e6ddff"/><path d="M32 29 50 5l18 24Z" fill="#ad9df0"/><circle cx="50" cy="49" r="14" fill="#fb7d83"/><path d="M31 73h38" stroke="#ad9df0" stroke-width="9"/></g></svg>' },
+        ufo: { label: 'Ovni', lift: 190, svg: '<svg viewBox="0 0 64 64" aria-hidden="true"><g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M20 30q12-16 24 0" fill="#63c8e0"/><ellipse cx="32" cy="36" rx="26" ry="11" fill="#ad9df0"/><circle cx="21" cy="36" r="3" fill="#ffcc58" stroke="none"/><circle cx="32" cy="38" r="3" fill="#ffcc58" stroke="none"/><circle cx="43" cy="36" r="3" fill="#ffcc58" stroke="none"/></g></svg>' },
+      };
       const world = document.querySelector('#world');
       const rocket = document.querySelector('#rocket');
       const land = document.querySelector('#land');
       const pad = document.querySelector('#pad');
+      const livesBox = document.querySelector('#lives');
       const enterKey = document.querySelector('#enter-key');
       const spaceKey = document.querySelector('#space-key');
-      const progress = Juegos.progress(10);
+      const progress = Juegos.progress(STARS_PER_LEVEL);
       const medals = Juegos.medals();
       Juegos.homeButton();
       Juegos.guardRightClick();
-      let level = 0, successes = 0, sequence = 0, height = 0, velocity = 0;
-      let star = null, distance = 0, lastTime = 0;
+      let level = 0, successes = 0, missed = 0, hops = 0, starSequence = 0;
+      let height = 0, velocity = 0, rocketX = PAD_CX, phase = 0;
+      let lives = 3, distance = 0, record = 0, invulnerableUntil = 0;
+      let hazardsBeforeNextStar = 0, cooldown = 0, items = [], lastTime = 0;
       const flashTimers = new Map();
 
       // Local helper: keycap feedback also remains visible with reduced motion.
@@ -92,89 +129,208 @@
         enterKey.classList.toggle('active', value === 'ready');
         spaceKey.classList.toggle('active', value === 'flying');
       }
-      function spawn() {
-        const cfg = LEVELS[level];
-        const elevation = cfg.heights[sequence++ % cfg.heights.length];
-        const el = document.createElement('div');
-        el.className = 'star';
-        el.innerHTML = '<svg viewBox="0 0 60 60" aria-hidden="true"><path d="m30 4 8 16 18 3-13 13 3 19-16-9-16 9 3-19L4 23l18-3z" fill="#ffcc58" stroke="#24334b" stroke-width="4" stroke-linejoin="round"/><path d="m26 18-5 9" stroke="#fff5da" stroke-width="4" stroke-linecap="round"/></svg>';
-        el.setAttribute('aria-label', 'Estrella');
-        el.dataset.height = elevation;
-        world.appendChild(el);
-        star = { el, x: Math.min(world.clientWidth - 45, 463), height: elevation };
-        placeStar();
+      function metres() {
+        return Math.round(distance / PIXELS_PER_METRE);
       }
-      function placeStar() {
-        star.el.style.left = `${star.x - 30}px`;
-        star.el.style.bottom = `${35 + 43 + star.height - 30}px`;
+      function renderLives() {
+        livesBox.replaceChildren();
+        for (let i = 0; i < 3; i++) {
+          const heart = document.createElement('span');
+          heart.textContent = '❤️';
+          if (i >= lives) heart.className = 'lost';
+          livesBox.append(heart);
+        }
+      }
+      function sweep() {
+        const width = world.clientWidth;
+        return { width, mid: width / 2, amp: Math.max(60, (width - 2 * MARGIN - ROCKET_W) / 2) };
+      }
+      // Take off from the pad without a jump: same place, then the sweep starts.
+      function launchPhase() {
+        const { mid, amp } = sweep();
+        return Math.asin(Math.max(-1, Math.min(1, (PAD_CX - mid) / amp)));
+      }
+      // The rocket flies by itself, so the ground is what moves: that is the flight.
+      function nextKind() {
+        if (hazardsBeforeNextStar > 0) {
+          hazardsBeforeNextStar--;
+          return Juegos.pick(LEVELS[level].hazards);
+        }
+        hazardsBeforeNextStar = level < 2 ? 1 : 2;
+        return 'star';
+      }
+      function place(item) {
+        const size = item.kind === 'star' ? 60 : 64;
+        item.el.style.left = `${item.x - size / 2}px`;
+        item.el.style.bottom = `${78 + item.lift - size / 2}px`;
+        item.el.dataset.x = String(Math.round(item.x));
+      }
+      function spawn(kind) {
+        const el = document.createElement('div');
+        const start = world.clientWidth + 40;
+        if (kind === 'star') {
+          const cfg = LEVELS[level];
+          const lift = cfg.heights[starSequence++ % cfg.heights.length];
+          el.className = 'star';
+          el.dataset.height = String(lift);
+          el.setAttribute('aria-label', 'Estrella');
+          el.innerHTML = STAR_SVG;
+          items.push({ kind, el, x: start, lift });
+        } else {
+          const def = HAZARDS[kind];
+          el.className = 'hazard';
+          el.dataset.kind = kind;
+          el.setAttribute('aria-label', def.label);
+          el.innerHTML = def.svg;
+          items.push({ kind, el, x: start, lift: def.lift });
+        }
+        world.appendChild(el);
+        place(items.at(-1));
+      }
+      function remove(item) {
+        items = items.filter(other => other !== item);
+        item.el.remove();
+      }
+      function collect(item) {
+        const box = item.el.getBoundingClientRect();
+        remove(item);
+        Juegos.sound.star();
+        Juegos.burst(box.x + box.width / 2, box.y + box.height / 2, '✨');
+        progress.set(++successes);
+        if (successes === STARS_PER_LEVEL) endLevel(true);
+      }
+      function takeHit(item) {
+        if (performance.now() < invulnerableUntil) return;
+        const box = rocket.getBoundingClientRect();
+        remove(item);
+        lives--;
+        world.dataset.lives = String(lives);
+        renderLives();
+        Juegos.sound.oops();
+        Juegos.burst(box.x + box.width / 2, box.y + box.height / 2, '💥');
+        invulnerableUntil = performance.now() + INVULNERABLE_MS;
+        rocket.classList.add('hurt');
+        if (lives === 0) endLevel(false);
+      }
+      function moveItems(dt, cfg) {
+        for (const item of items) {
+          item.x -= cfg.speed * dt;
+          place(item);
+        }
+        for (const item of [...items]) {
+          if (Math.abs(item.x - rocketX) >= HIT_X || Math.abs(item.lift - height) >= HIT_Y) continue;
+          if (item.kind === 'star') collect(item);
+          else takeHit(item);
+        }
+        for (const item of [...items]) {
+          if (item.x > -70) continue;
+          if (item.kind === 'star') {
+            world.dataset.missed = String(++missed);
+          }
+          remove(item);
+        }
+      }
+      function step(dt) {
+        const cfg = LEVELS[level];
+        const { mid, amp } = sweep();
+        // Horizontal flight: a slow sweep, so the rocket flies instead of sitting still.
+        phase += (Math.PI / SWEEP_SECONDS) * dt;
+        rocketX = mid + amp * Math.sin(phase);
+        // Vertical flight: one hop per press, gravity brings the rocket back down.
+        velocity -= GRAVITY * dt;
+        height = Math.max(0, Math.min(MAX_LIFT, height + velocity * dt));
+        if (height === 0 && velocity < 0) velocity = 0;
+        rocket.style.left = `${rocketX - ROCKET_W / 2}px`;
+        rocket.style.transform = `translateY(${-height}px) rotate(${Math.cos(phase) * 10}deg)`;
+        rocket.dataset.height = String(Math.round(height));
+        rocket.dataset.x = String(Math.round(rocketX));
+        if (performance.now() >= invulnerableUntil) rocket.classList.remove('hurt');
+        // The ground scrolls, and its scroll is the distance flown.
+        distance += cfg.speed * dt;
+        land.style.backgroundPositionX = `${-distance}px`;
+        world.dataset.distance = String(metres());
+        cooldown += dt;
+        if (cooldown >= GAP_SECONDS) {
+          cooldown = 0;
+          spawn(nextKind());
+        }
+        moveItems(dt, cfg);
+      }
+      async function endLevel(won) {
+        state('result');
+        const flown = metres();
+        record = Math.max(record, flown);
+        world.dataset.record = String(record);
+        const line = `Has volado ${flown} metros · Récord: ${record} metros`;
+        items.forEach(item => item.el.remove());
+        items = [];
+        if (won) {
+          const last = level === LEVELS.length - 1;
+          medals.add(last ? '🏆' : '🏅');
+          await Juegos.celebrate(last ? '🏆' : '🎉', line);
+          level = Math.min(level + 1, LEVELS.length - 1);
+        } else {
+          Juegos.sound.oops();
+          await Juegos.overlay('💥', line);
+        }
+        startLevel();
       }
       function startLevel() {
         successes = 0;
-        sequence = 0;
-        height = velocity = 0;
-        world.dataset.missed = '0';
-        rocket.dataset.height = '0';
-        rocket.style.transform = '';
-        pad.hidden = false;
+        missed = 0;
+        starSequence = 0;
+        height = 0;
+        velocity = 0;
+        hops = 0;
+        lives = 3;
+        distance = 0;
+        invulnerableUntil = 0;
+        hazardsBeforeNextStar = 0;
+        cooldown = 0;
+        items.forEach(item => item.el.remove());
+        items = [];
         progress.set(0);
+        world.dataset.missed = '0';
+        world.dataset.lives = '3';
+        world.dataset.distance = '0';
+        world.dataset.speed = String(LEVELS[level].speed);
+        rocket.dataset.height = '0';
+        rocket.dataset.hops = '0';
+        rocket.classList.remove('hurt');
+        renderLives();
+        rocketX = PAD_CX;
+        rocket.style.left = `${PAD_CX - ROCKET_W / 2}px`;
+        rocket.style.transform = 'translateY(0) rotate(0deg)';
+        pad.hidden = false;
         state('ready');
-      }
-      async function finishLevel() {
-        state('celebrating');
-        const last = level === LEVELS.length - 1;
-        medals.add(last ? '🏆' : '🏅');
-        await Juegos.celebrate(last ? '🏆' : '🎉');
-        level = Math.min(level + 1, LEVELS.length - 1);
-        startLevel();
       }
       window.addEventListener('keydown', e => {
         if (e.code === 'Space' || e.key === 'Enter') e.preventDefault();
-        if (e.repeat || !['ready', 'flying'].includes(world.dataset.state)) return;
-        if (world.dataset.state === 'ready' && e.key === 'Enter') {
+        if (e.repeat) return;
+        const now = world.dataset.state;
+        if (now === 'ready' && e.key === 'Enter') {
           state('flying');
           pad.hidden = true;
+          phase = launchPhase();
+          cooldown = 0;
           Juegos.sound.click();
-          spawn();
-        } else if (world.dataset.state === 'flying' && e.code === 'Space') {
-          velocity = 480;
-          rocket.dataset.hops = Number(rocket.dataset.hops) + 1;
+          spawn(nextKind());
+        } else if (now === 'flying' && e.code === 'Space') {
+          // One hop per landing: holding the key can never make the rocket hover.
+          if (height > 0 || velocity > 0) return;
+          velocity = JUMP;
+          rocket.dataset.hops = String(++hops);
           flash(spaceKey, 'lit');
           Juegos.sound.click();
-        } else {
+        } else if (now === 'ready' || now === 'flying') {
           Juegos.sound.oops();
-          flash(world.dataset.state === 'ready' ? enterKey : spaceKey, 'hint');
+          flash(now === 'ready' ? enterKey : spaceKey, 'hint');
         }
       });
       function loop(time) {
         const dt = Math.min((time - lastTime) / 1000, 0.04);
         lastTime = time;
-        if (world.dataset.state === 'flying') {
-          const cfg = LEVELS[level];
-          velocity -= 700 * dt;
-          height = Math.min(Math.max(0, world.clientHeight - 170), Math.max(0, height + velocity * dt));
-          if (height === 0 && velocity < 0) velocity = 0;
-          rocket.style.transform = `translateY(${-height}px)`;
-          rocket.dataset.height = height;
-          distance += cfg.speed * dt;
-          land.style.backgroundPositionX = `${-distance}px`;
-          star.x -= cfg.speed * dt;
-          placeStar();
-          // Generous circular collision, but ground flight never reaches a star.
-          if (Math.hypot(star.x - 163, star.height - height) < 55) {
-            const box = star.el.getBoundingClientRect();
-            Juegos.sound.star();
-            Juegos.burst(box.x + 30, box.y + 30, '✨');
-            star.el.remove();
-            star = null;
-            progress.set(++successes);
-            if (successes === 10) finishLevel();
-            else spawn();
-          } else if (star.x < -40) {
-            star.el.remove();
-            world.dataset.missed = Number(world.dataset.missed) + 1;
-            spawn();
-          }
-        }
+        if (world.dataset.state === 'flying') step(dt);
         requestAnimationFrame(loop);
       }
       const preview = rocket.cloneNode(true);

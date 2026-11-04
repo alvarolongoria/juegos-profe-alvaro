@@ -132,8 +132,9 @@ const Juegos = (() => {
     };
   }
 
-  // Overlay with a big emoji (or element) and a green play button. Resolves on click.
-  function overlay(emoji) {
+  // Overlay with a big emoji (or element), an optional result line and a green
+  // play button. Resolves on click.
+  function overlay(emoji, text) {
     return new Promise((resolve) => {
       const layer = document.createElement("div");
       layer.className = "overlay";
@@ -150,7 +151,14 @@ const Juegos = (() => {
         layer.remove();
         resolve();
       });
-      layer.append(big, btn);
+      layer.append(big);
+      if (text) {
+        const line = document.createElement("div");
+        line.className = "overlay-text";
+        line.textContent = text;
+        layer.append(line);
+      }
+      layer.append(btn);
       document.body.appendChild(layer);
     });
   }
@@ -159,10 +167,10 @@ const Juegos = (() => {
     return overlay(emoji);
   }
 
-  function celebrate(emoji = "🎉") {
+  function celebrate(emoji = "🎉", text) {
     sound.win();
     confetti();
-    return overlay(emoji);
+    return overlay(emoji, text);
   }
 
   // Right-click shows a friendly "green button" hint instead of a menu.
@@ -194,5 +202,5 @@ const Juegos = (() => {
     return list[Math.floor(Math.random() * list.length)];
   }
 
-  return { sound, burst, confetti, homeButton, progress, medals, startScreen, celebrate, guardRightClick, bubbleIcon, random, pick };
+  return { sound, burst, confetti, homeButton, progress, medals, overlay, startScreen, celebrate, guardRightClick, bubbleIcon, random, pick };
 })();
