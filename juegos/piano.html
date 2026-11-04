@@ -65,10 +65,14 @@
     </main>
     <script src="../assets/common.js"></script>
     <script>
-      const LEVELS = ["AEIOU", "MPLST", "ÑABCDEFGHIJKLMNOPQRSTUVWXYZ", "123456789"];
+      // Easiest first: vowels, five consonants, numbers, then the whole alphabet at random.
+      // Each level asks for more keys, so it is longer as well as harder.
+      const LEVELS = ["AEIOU", "MPLST", "123456789", "ÑABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+      const GOALS = [5, 7, 9, 12];
+      const SHUFFLED_LEVEL = 3; // the whole alphabet, drawn at random
       const ROWS = ["1234567890", "QWERTYUIOP", "ASDFGHJKLÑ", "ZXCVBNM"];
       const PITCHES = "ABCDEFGHIJKLMNOPQRSTUVWXYZÑ1234567890";
-      const progress = Juegos.progress(10);
+      let progress = null;
       const medals = Juegos.medals();
       const target = document.getElementById("target");
       const feedback = document.getElementById('feedback');
@@ -138,7 +142,9 @@
         position = 0;
         feedback.textContent = '';
         keyboardHint.hidden = true;
-        progress.set(0);
+        // The shared star bar has a fixed size, so each level gets a fresh one.
+        document.querySelector(".progress")?.remove();
+        progress = Juegos.progress(GOALS[level]);
         showTarget();
         playing = true;
       }
@@ -179,10 +185,10 @@
         Juegos.burst(box.x + box.width / 2, box.y + box.height / 2, "⭐");
         successes++;
         progress.set(successes);
-        if (successes === 10) finishLevel();
+        if (successes === GOALS[level]) finishLevel();
         else {
           // After the first Ñ, every letter can be drawn, without immediate repeats.
-          if (level === 2) position = (position + 1 + Math.floor(Math.random() * (LEVELS[level].length - 1))) % LEVELS[level].length;
+          if (level === SHUFFLED_LEVEL) position = (position + 1 + Math.floor(Math.random() * (LEVELS[level].length - 1))) % LEVELS[level].length;
           else position++;
           showTarget();
         }
