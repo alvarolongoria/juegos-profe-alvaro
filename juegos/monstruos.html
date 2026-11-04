@@ -61,13 +61,15 @@
   <div class="tray" aria-label="Piezas para arrastrar"></div>
   <script src="../assets/common.js"></script>
   <script>
-    const LEVELS = [{ slots: 3, tolerance: 65 }, { slots: 4, tolerance: 45 }, { slots: 5, tolerance: 20 }];
+    // Each level: parts per monster, drop precision and parts to reach. The goal is two
+    // whole monsters, so a level never ends with a half-built one.
+    const LEVELS = [{ slots: 3, tolerance: 65, goal: 6 }, { slots: 4, tolerance: 45, goal: 8 }, { slots: 5, tolerance: 20, goal: 10 }];
     const PARTS = [['🎩', '👀', '👄', '🎀', '👃'], ['👑', '👓', '👅', '🌸', '⭐'], ['🎀', '👀', '👄', '🍀', '👃']];
     const POSITIONS = [[122, -40], [122, 65], [122, 220], [12, 150], [232, 150]];
     const COLORS = ['#4ade80', '#fb923c', '#38bdf8', '#f472b6'];
     const monster = document.querySelector('.monster');
     const tray = document.querySelector('.tray');
-    const progress = Juegos.progress(10);
+    let progress = null;
     const medals = Juegos.medals();
     Juegos.homeButton();
     Juegos.guardRightClick();
@@ -166,7 +168,7 @@
         successes++;
         progress.set(successes);
         if (placed === LEVELS[level].slots) monster.classList.add('dancing');
-        if (successes === 10) finishLevel();
+        if (successes === LEVELS[level].goal) finishLevel();
         else if (placed === LEVELS[level].slots) {
           playing = false;
           setTimeout(() => { newMonster(); playing = true; }, 750);
@@ -183,7 +185,9 @@
     }
     function startLevel() {
       successes = 0;
-      progress.set(0);
+      // The shared star bar has a fixed size, so each level gets a fresh one.
+      document.querySelector('.progress')?.remove();
+      progress = Juegos.progress(LEVELS[level].goal);
       newMonster();
       playing = true;
     }

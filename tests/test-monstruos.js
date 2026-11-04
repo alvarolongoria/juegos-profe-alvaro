@@ -40,18 +40,23 @@ async function center(locator) {
   await drag(page, first, await center(page.locator('.slot').nth(1)));
   await page.waitForTimeout(400);
   check(await page.locator('.progress .on').count() === 0, 'wrong slot does not count');
+  // Each level asks for two whole monsters: 6, 8 and then 10 parts.
+  const goals = [6, 8, 10];
   const counts = [];
   for (let level = 1; level <= 3; level++) {
+    const goal = goals[level - 1];
+    check(await page.locator('.progress span').count() === goal, `level ${level}: asks for ${goal} parts (${await page.locator('.progress span').count()})`);
     counts.push(await page.locator('.slot').count());
-    for (let success = 1; success <= 10; success++) {
+    for (let success = 1; success <= goal; success++) {
       await page.waitForSelector('.part:not(.placed)');
       const part = page.locator('.part:not(.placed)').first();
       const id = await part.getAttribute('data-slot');
       await drag(page, part, await center(page.locator(`.slot[data-slot="${id}"]`)));
       check(await page.locator('.progress .on').count() === success, `level ${level}: part ${success} counts once`);
       if (level === 1 && success === 3) check(await page.locator('.monster.dancing').count() === 1, 'complete monster dances');
-      if (success < 10) await page.waitForFunction(() => !document.querySelector('.monster.dancing'));
+      if (success < goal) await page.waitForFunction(() => !document.querySelector('.monster.dancing'));
     }
+    check(await page.locator('.monster.dancing').count() === 1, `level ${level}: ends with a whole monster`);
     await page.waitForSelector('.overlay');
     check(await page.locator('.medals').textContent() === '🏅'.repeat(Math.min(level, 2)) + (level === 3 ? '🏆' : ''), `level ${level}: correct medal`);
     await pressPlay(page);
