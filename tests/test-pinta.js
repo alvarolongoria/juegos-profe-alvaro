@@ -38,7 +38,7 @@ async function paintDrawing(page) {
   while ((await done(page)) === before && Date.now() < deadline) {
     if (await page.locator(".overlay").count()) break;
     const p = await zonePoint(page);
-    if (p) await page.mouse.move(p.x, p.y, { steps: 3 });
+    if (p) await page.mouse.click(p.x, p.y);
     else await page.waitForTimeout(50);
   }
 }
@@ -52,18 +52,19 @@ async function paintDrawing(page) {
     await pressPlay(page);
     await page.waitForSelector(".drawing .zone");
 
-    // The pointer rests where the play button was, so a zone under it may
-    // already be painted: compare against that baseline.
-    await page.mouse.move(30, 740);
+    // Only a left click on a zone paints it: hovering, a right click, a click
+    // outside the drawing or a key paint nothing.
     const start = await painted(page);
     await page.mouse.click(30, 740);
     await page.keyboard.press("Space");
-    check((await painted(page)) === start, "clicks and keys paint nothing");
-
-    // Hovering one zone paints exactly that zone, with a visible sparkle.
+    check((await painted(page)) === start, "clicks outside a zone and keys paint nothing");
     const p = await zonePoint(page);
-    await page.mouse.move(p.x, p.y);
-    check((await painted(page)) === start + 1, "hovering a zone paints it");
+    await page.mouse.move(p.x, p.y, { steps: 3 });
+    check((await painted(page)) === start, "hovering a zone paints nothing");
+    await page.mouse.click(p.x, p.y, { button: "right" });
+    check((await painted(page)) === start, "a right click on a zone paints nothing");
+    await page.mouse.click(p.x, p.y);
+    check((await painted(page)) === start + 1, "clicking a zone paints it");
     check(
       await page.locator(".drawing .zone.painted").first().evaluate((el) => el.getAttribute("fill") !== "#f1f5f9"),
       "a painted zone gets its colour"

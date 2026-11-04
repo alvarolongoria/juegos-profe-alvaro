@@ -199,8 +199,10 @@
         current.innerHTML = `<svg viewBox="0 0 600 400" aria-hidden="true">${zones
           .map((z) => `<path class="zone" d="${z.d}" fill="${GREY}" data-color="${z.color}"/>`)
           .join("")}${decor}</svg>`;
-        // Passing over a zone is enough: no click needed.
-        current.addEventListener("pointerover", (e) => paint(e.target, e.clientX, e.clientY));
+        // A left click on a zone paints it; passing over it does nothing.
+        current.addEventListener("click", (e) => {
+          if (e.button === 0) paint(e.target, e.clientX, e.clientY);
+        });
         document.body.append(current);
       }
 
