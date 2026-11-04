@@ -49,10 +49,15 @@ async function whackNext(page) {
     await page.waitForTimeout(show1 + 300);
     check((await hits(page)) === 0, "a mole that hides on its own changes nothing");
 
-    for (let level = 1; level <= 2; level++) {
-      for (let n = 1; n <= 10; n++) {
+    // Each level asks for more hits: 5, 7, 9 and then 12.
+    const goals = [5, 7, 9, 12];
+    const goalShown = async () => page.locator(".progress span").count();
+    for (let level = 1; level <= 3; level++) {
+      const goal = goals[level - 1];
+      check((await goalShown()) === goal, `level ${level}: asks for ${goal} hits (${await goalShown()})`);
+      for (let n = 1; n <= goal; n++) {
         await whackNext(page);
-        if (n < 10) check((await hits(page)) === n, `level ${level}: hit ${n} counts once`);
+        if (n < goal) check((await hits(page)) === n, `level ${level}: hit ${n} counts once`);
         if (level === 1 && n === 1) {
           check((await page.locator(".mole.hit").count()) >= 1, "a whacked mole shows a dizzy face");
           check(await page.locator(".mole.hit .face-hit").first().isVisible(), "gameplay hit face is visible");
@@ -64,9 +69,10 @@ async function whackNext(page) {
       check((await page.locator(".medals").textContent()) === "🏅".repeat(level), `level ${level}: medal awarded`);
       await pressPlay(page);
     }
-    const show3 = Number(await page.locator("body").getAttribute("data-show"));
-    check(show3 < show1, `moles stay up for less time each level (${show1} -> ${show3} ms)`);
-    check(Number(await page.locator("body").getAttribute("data-max")) === 2, "level 3: up to two moles at once");
+    check((await goalShown()) === 12, `level 4: asks for 12 hits (${await goalShown()})`);
+    const show4 = Number(await page.locator("body").getAttribute("data-show"));
+    check(show4 < show1, `moles stay up for less time in later levels (${show1} -> ${show4} ms)`);
+    check(Number(await page.locator("body").getAttribute("data-max")) === 2, "later levels: up to two moles at once");
 
     await page.emulateMedia({ reducedMotion: "reduce" });
     check(

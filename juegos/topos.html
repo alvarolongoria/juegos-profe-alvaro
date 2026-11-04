@@ -167,14 +167,14 @@
     <div class="cloud" style="top: 190px; width: 80px; animation-delay: -32s" aria-hidden="true"></div>
     <script src="../assets/common.js"></script>
     <script>
-      // Each level: how long a mole stays up (ms), moles at once, pause between moles (ms).
+      // Each level: hits to reach, how long a mole stays up (ms), moles at once and
+      // pause between moles (ms). Levels get longer as well as harder.
       const LEVELS = [
-        { show: 2600, max: 1, gap: 600 },
-        { show: 2000, max: 1, gap: 450 },
-        { show: 1500, max: 2, gap: 350 },
-        { show: 1200, max: 2, gap: 250 },
+        { goal: 5, show: 2600, max: 1, gap: 600 },
+        { goal: 7, show: 2000, max: 1, gap: 450 },
+        { goal: 9, show: 1500, max: 2, gap: 350 },
+        { goal: 12, show: 1200, max: 2, gap: 250 },
       ];
-      const HITS_PER_LEVEL = 10;
       const SPOTS = [
         [22, 210], [50, 210], [78, 210],
         [22, 450], [50, 450], [78, 450],
@@ -229,7 +229,7 @@
         return mole;
       });
 
-      const progress = Juegos.progress(HITS_PER_LEVEL);
+      let progress = null;
       const medals = Juegos.medals();
       Juegos.homeButton();
       Juegos.guardRightClick();
@@ -269,7 +269,7 @@
         hits++;
         progress.set(hits);
         setTimeout(() => hide(mole), 450);
-        if (hits >= HITS_PER_LEVEL) finishLevel();
+        if (hits >= LEVELS[level].goal) finishLevel();
       }
 
       async function finishLevel() {
@@ -285,7 +285,9 @@
 
       function startLevel() {
         hits = 0;
-        progress.set(0);
+        // The shared star bar has a fixed size, so each level gets a fresh one.
+        document.querySelector(".progress")?.remove();
+        progress = Juegos.progress(LEVELS[level].goal);
         document.body.dataset.show = String(LEVELS[level].show);
         document.body.dataset.max = String(LEVELS[level].max);
         playing = true;
