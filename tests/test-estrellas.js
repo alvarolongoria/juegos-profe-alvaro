@@ -62,8 +62,12 @@ async function hold(page) {
     const after = await fill(page);
     check(after < half && after > 0, `leaving empties the ring slowly (${half} -> ${after})`);
 
+    // Each level asks for more catches: 5, 7, 9 and then 12.
+    const goals = [5, 7, 9, 12];
     const sizes = [];
-    for (let level = 1; level <= 2; level++) {
+    for (let level = 1; level <= 3; level++) {
+      const goal = goals[level - 1];
+      check((await page.locator(".progress span").count()) === goal, `level ${level}: asks for ${goal} catches (${await page.locator(".progress span").count()})`);
       sizes.push(await page.locator(".star-target").evaluate((el) => el.offsetWidth));
       if (level === 2) {
         await page.mouse.move(20, 700);
@@ -71,15 +75,15 @@ async function hold(page) {
         await page.waitForTimeout(600);
         const b = await center(page);
         check(Math.hypot(a.x - b.x, a.y - b.y) > 10, "level 2: the star drifts on its own");
-      } else {
+      } else if (level === 1) {
         const a = await center(page);
         await page.waitForTimeout(400);
         const b = await center(page);
         check(a.x === b.x && a.y === b.y, "level 1: the star stays still");
       }
-      for (let n = 1; n <= 10; n++) {
+      for (let n = 1; n <= goal; n++) {
         await hold(page);
-        if (n < 10) check((await caught(page)) === n, `level ${level}: catch ${n} counts once`);
+        if (n < goal) check((await caught(page)) === n, `level ${level}: catch ${n} counts once`);
         if (level === 1 && n === 1) check((await page.locator(".particle").count()) >= 1, "a catch bursts into sparkles");
       }
       await page.waitForSelector(".overlay");
@@ -87,8 +91,9 @@ async function hold(page) {
       await pressPlay(page);
       await page.waitForSelector(".star-target");
     }
+    check((await page.locator(".progress span").count()) === 12, `level 4: asks for 12 catches (${await page.locator(".progress span").count()})`);
     sizes.push(await page.locator(".star-target").evaluate((el) => el.offsetWidth));
-    check(sizes[0] > sizes[1] && sizes[1] > sizes[2], `the star gets smaller (${sizes})`);
+    check(sizes.every((size, i) => i === 0 || size < sizes[i - 1]), `the star gets smaller every level (${sizes})`);
 
     await page.emulateMedia({ reducedMotion: "reduce" });
     check(

@@ -118,14 +118,14 @@
     </svg>
     <script src="../assets/common.js"></script>
     <script>
-      // Each level: star size (px), drift speed (px/s) and seconds to hold.
+      // Each level: catches to reach, star size (px), drift speed (px/s) and seconds to hold.
+      // Levels get longer as well as harder.
       const LEVELS = [
-        { size: 180, speed: 0, hold: 0.9 },
-        { size: 150, speed: 60, hold: 0.9 },
-        { size: 125, speed: 90, hold: 1.0 },
-        { size: 105, speed: 120, hold: 1.1 },
+        { goal: 5, size: 180, speed: 0, hold: 0.9 },
+        { goal: 7, size: 150, speed: 60, hold: 0.9 },
+        { goal: 9, size: 125, speed: 90, hold: 1.0 },
+        { goal: 12, size: 105, speed: 120, hold: 1.1 },
       ];
-      const CATCHES_PER_LEVEL = 10;
       const TOP_MARGIN = 120; // keeps the star below the home button and progress bar
       const RING = 2 * Math.PI * 46;
 
@@ -152,7 +152,7 @@
         document.body.append(dot);
       }
 
-      const progress = Juegos.progress(CATCHES_PER_LEVEL);
+      let progress = null;
       const medals = Juegos.medals();
       Juegos.homeButton();
       Juegos.guardRightClick();
@@ -216,7 +216,7 @@
         Juegos.burst(star.x, star.y, "✨", 12);
         catches++;
         progress.set(catches);
-        if (catches >= CATCHES_PER_LEVEL) {
+        if (catches >= LEVELS[level].goal) {
           playing = false;
           star.el.remove();
           star = null;
@@ -232,7 +232,9 @@
 
       function startLevel() {
         catches = 0;
-        progress.set(0);
+        // The shared star bar has a fixed size, so each level gets a fresh one.
+        document.querySelector(".progress")?.remove();
+        progress = Juegos.progress(LEVELS[level].goal);
         newStar();
         playing = true;
       }
