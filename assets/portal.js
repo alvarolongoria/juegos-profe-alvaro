@@ -59,20 +59,26 @@ const Portal = (() => {
     const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 
     // A spot is free when the popped-up mascot would not collide with anything else.
+    // Every card is checked at a few points along its top edge; the mascot then
+    // picks one of the free spots, preferring a card it did not use last time.
     function findSpot() {
       const cards = [...document.querySelectorAll("main a.card")];
-      const bubble = document.querySelector(".hello").getBoundingClientRect();
-      for (let tries = 0; tries < 30; tries++) {
-        const card = cards[Math.floor(Math.random() * cards.length)];
-        if (card === lastCard && cards.length > 1) continue;
+      // The greeting and the school logo are never covered by the mascot.
+      const keepClear = [".hello", ".school img"].map(sel => document.querySelector(sel).getBoundingClientRect());
+      const spots = [];
+      for (const card of cards) {
         const r = card.getBoundingClientRect();
         if (r.width < W || r.top - VISIBLE < 56 || r.top > innerHeight - 40) continue;
-        const px = r.left + Math.random() * (r.width - W);
-        const box = { left: px, right: px + W, top: r.top - VISIBLE, bottom: r.top };
-        const blocked = cards.some(c => c !== card && overlaps(box, c.getBoundingClientRect())) || overlaps(box, bubble);
-        if (!blocked) return { card, px, top: r.top };
+        for (let step = 0; step <= 4; step++) {
+          const px = r.left + (step / 4) * (r.width - W);
+          const box = { left: px, right: px + W, top: r.top - VISIBLE, bottom: r.top };
+          const blocked = cards.some(c => c !== card && overlaps(box, c.getBoundingClientRect())) || keepClear.some(k => overlaps(box, k));
+          if (!blocked) spots.push({ card, px, top: r.top });
+        }
       }
-      return null;
+      const fresh = spots.filter(spot => spot.card !== lastCard);
+      const pool = fresh.length ? fresh : spots;
+      return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
     }
 
     function talk(text) {

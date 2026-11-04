@@ -41,6 +41,23 @@ const { openGame, check, finish } = require('./helpers');
   await page.waitForFunction(() => getComputedStyle(document.querySelector('.boliche')).visibility === 'hidden', null, { timeout: 8000 });
   check(true, 'mascot hides again');
 
+  // The whole portal fits without scrolling on common classroom screens
+  // (a 1920x1080 screen at 125% zoom, and a 1366x768 laptop).
+  for (const [width, height] of [[1516, 694], [1366, 657]]) {
+    await page.setViewportSize({ width, height });
+    const fit = await page.evaluate(() => ({ page: document.documentElement.scrollHeight, view: innerHeight }));
+    check(fit.page <= fit.view, `portal fits without scrolling at ${width}x${height} (${fit.page} <= ${fit.view})`);
+  }
+  // On the short screen Boliche still finds spots, and never covers the school logo.
+  for (let peek = 1; peek <= 2; peek++) {
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('.boliche')).visibility === 'hidden', null, { timeout: 8000 });
+    await page.waitForSelector('.say.on', { timeout: 15000 });
+    check(await page.evaluate(() => {
+      const a = document.querySelector('.boliche').getBoundingClientRect(), b = document.querySelector('.school img').getBoundingClientRect();
+      return a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
+    }), `mascot peek ${peek} leaves the school logo uncovered`);
+  }
+
   check(ctx.errors.length === 0 && ctx.external.length === 0, 'portal has no errors or external requests');
   await ctx.browser.close();
 })();
