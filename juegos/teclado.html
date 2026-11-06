@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Naves del teclado</title>
+    <link rel="stylesheet" href="../assets/common.css" />
+    <style>
+      body { background: #24334b; }
+      .space { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+      #sky { position: fixed; inset: 0; overflow: hidden; }
+      /* Hearts: how many ships may still land in this level. */
+      #lives { position: fixed; top: 20px; left: 112px; z-index: 40; display: flex; gap: 2px; padding: 6px 12px; border: 3px solid #24334b; border-radius: 40px; background: #fff7e4; box-shadow: 0 4px #142341; font-size: 26px; line-height: 1.2; }
+      #lives span.lost { filter: grayscale(1) opacity(0.3); transform: scale(0.8); }
+      #stats { position: fixed; left: 16px; bottom: 16px; z-index: 40; padding: 6px 14px; border: 3px solid #24334b; border-radius: 18px; background: #fff7e4; box-shadow: 0 4px #142341; color: #24334b; font-size: 22px; font-weight: bold; }
+      #stats[hidden] { display: none; }
+      .ship { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; will-change: transform; }
+      .ship svg { width: 74px; height: 56px; animation: hover 1.2s ease-in-out infinite; }
+      .ship .label { padding: 2px 12px; border: 4px solid #24334b; border-radius: 14px; background: #fff7e4; color: #24334b; font-size: 34px; font-weight: bold; line-height: 1.15; white-space: pre; }
+      body[data-grade="1"] .ship .label { font-size: 48px; }
+      .ship .done { color: #22a06b; text-decoration: underline 4px; }
+      .ship.locked .label { background: #ffcc58; box-shadow: 0 0 0 4px #fff7e4; }
+      .ship.wrong .label { background: #c4b5ef; }
+      #cannon { position: fixed; left: 50%; bottom: 0; width: 120px; height: 96px; margin-left: -60px; z-index: 30; pointer-events: none; }
+      #cannon .barrel { transform-origin: 60px 70px; transition: transform 0.08s; }
+      .laser { position: fixed; height: 6px; border-radius: 3px; background: #ffcc58; box-shadow: 0 0 10px #ffcc58; transform-origin: 0 50%; z-index: 25; pointer-events: none; animation: fade 0.2s linear forwards; }
+      .overlay .overlay-text { white-space: pre-line; text-align: center; }
+      .grade-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; max-width: 760px; }
+      .grade-row .play-btn { width: 96px; height: 96px; font-size: 36px; font-weight: bold; }
+      @keyframes hover { 50% { transform: translateY(-5px); } }
+      @keyframes fade { to { opacity: 0; } }
+      @media (max-height: 650px) { .ship .label { font-size: 28px; } body[data-grade="1"] .ship .label { font-size: 40px; } .ship svg { width: 60px; height: 45px; } #cannon { width: 96px; height: 77px; margin-left: -48px; } .grade-row .play-btn { width: 80px; height: 80px; font-size: 30px; } }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+        .particle, .confetti, .wrong-button-hint { display: none; }
+        .laser { opacity: 0.6; }
+      }
+    </style>
+  </head>
+  <body>
+    <svg class="space" viewBox="0 0 1366 768" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <g fill="#fff7e4">
+        <circle cx="120" cy="160" r="3"/><circle cx="300" cy="420" r="2"/><circle cx="520" cy="210" r="3"/><circle cx="760" cy="120" r="2"/>
+        <circle cx="980" cy="330" r="3"/><circle cx="1180" cy="180" r="2"/><circle cx="1260" cy="480" r="3"/><circle cx="640" cy="520" r="2"/>
+        <circle cx="200" cy="600" r="2"/><circle cx="880" cy="600" r="3"/><circle cx="420" cy="320" r="2"/><circle cx="1080" cy="560" r="2"/>
+      </g>
+      <g stroke="#142341" stroke-width="6" stroke-linejoin="round">
+        <circle cx="1220" cy="140" r="70" fill="#ad9df0"/><path d="M1150 140q70 30 140 0" fill="none"/>
+        <path d="M0 708q683-60 1366 0v60H0z" fill="#52699a"/>
+      </g>
+    </svg>
+    <main id="sky" aria-label="Naves del teclado"></main>
+    <div id="lives" aria-label="Corazones"></div>
+    <div id="stats" role="status" aria-live="polite" hidden></div>
+    <svg id="cannon" viewBox="0 0 120 96" aria-hidden="true">
+      <g stroke="#142341" stroke-width="5" stroke-linejoin="round">
+        <g class="barrel"><rect x="50" y="8" width="20" height="62" rx="6" fill="#fb7d83"/></g>
+        <path d="M14 96V74q46-40 92 0v22z" fill="#ffcc58"/>
+      </g>
+    </svg>
+    <script src="../assets/common.js"></script>
+    <script>
+      // Each grade has four levels, easiest first. 1º-2º ignore capitals;
+      // from 3º the text must be typed exactly, capitals and accents included.
+      const words = (s) => s.split(" ");
+      const GRADES = {
+        1: { speed: 22, every: 4, max: 2, wave: 1, levels: [
+          words("a e i o u"),
+          words("m p l s t"),
+          words("ma me mi mo mu pa pe pi po pu la le li lo lu sa se si so su ta te ti to tu"),
+          words("sol pato mesa pala sopa lupa mapa tela palo lima pelo oso ala pie sal mil"),
+        ] },
+        2: { speed: 30, every: 3.5, max: 2, wave: 1, levels: [
+          words("ca co cu ra re ro na ne no fa fe fo ba be bo da de di ga go ja jo va ñu"),
+          words("gato casa nube rana vaca lobo foto dedo rosa gota cama bota hilo jugo nido ropa faro"),
+          words("sofá árbol café papá mamá ratón avión limón jamón camión lápiz bebé menú sillón melón"),
+          words("gato nube rana lobo sofá árbol ratón avión limón camión lápiz bebé"),
+        ] },
+        3: { speed: 38, every: 3, max: 3, wave: 1, levels: [
+          words("planta camino ventana pelota cereza tortuga zapato bosque cocina dibujo escuela granja"),
+          words("niño araña montaña señal otoño mañana sueño pañuelo cariño piñata castaña muñeca"),
+          words("Madrid Sevilla Lucía Pablo España Marta Toledo Carmen Daniel Elena Valencia Granada"),
+          words("canción música plátano lámpara pirámide cámara océano árboles sábado número"),
+        ] },
+        5: { speed: 54, every: 2.4, max: 4, wave: 2, levels: [
+          words("bicicleta mariposa chocolate dinosaurio biblioteca calendario elefante tormenta escalera caracola"),
+          words("murciélago helicóptero campeón explicación compañero pequeñito teléfono matemáticas montañero"),
+          words("Barcelona Andalucía Atlántico Mediterráneo Pirineos Cervantes Picasso Europa Canarias Guadalquivir"),
+          ["El sol brilla", "Me gusta leer", "Hoy hace frío", "Mi perro corre", "La luna sale", "Vamos al parque",
+            "Tengo un libro", "Juego con mis amigos", "Las flores huelen bien", "Comemos fruta", "Bebo agua fresca", "Nado en la piscina"],
+        ] },
+      };
+      // Same content, a little faster: 4º plays like 3º, 6º like 5º.
+      GRADES[4] = { ...GRADES[3], speed: 46, every: 2.6 };
+      GRADES[6] = { ...GRADES[5], speed: 62, every: 2 };
+      const GOALS = [5, 7, 9, 12];
+      const HEARTS = 3;
+
+      const sky = document.getElementById("sky");
+      const livesBox = document.getElementById("lives");
+      const statsBox = document.getElementById("stats");
+      const barrel = document.querySelector("#cannon .barrel");
+      const medals = Juegos.medals();
+      Juegos.homeButton();
+      Juegos.guardRightClick();
+
+      let grade = 0;
+      let config = null;
+      let level = 0;
+      let progress = null;
+      let playing = false;
+      let alive = []; // { el, label, text, typed, x, y }
+      let locked = null;
+      let destroyed = 0;
+      let hearts = HEARTS;
+      let untilSpawn = 0;
+      let lastText = "";
+      let stats = null;
+      let lastFrame = 0;
+
+      // 1º-2º accept capitals for lowercase text; 3º and up must match exactly.
+      const same = (a, b) => (grade >= 3 ? a === b : a.toLowerCase() === b.toLowerCase());
+
+      function publish() {
+        document.body.dataset.grade = grade;
+        document.body.dataset.level = level;
+        document.body.dataset.hearts = hearts;
+        livesBox.replaceChildren(...Array.from({ length: HEARTS }, (_, i) => {
+          const s = document.createElement("span");
+          s.textContent = "❤️";
+          if (i >= hearts) s.className = "lost";
+          return s;
+        }));
+        livesBox.setAttribute("aria-label", `${hearts} corazones`);
+        statsBox.hidden = grade < 2;
+        statsBox.textContent = `Puntos: ${stats ? stats.score : 0}`;
+      }
+
+      function spawnOne(order = 0) {
+        // Never two ships that start with the same letter: the first key must pick one.
+        const taken = alive.map((s) => s.text[0].toLowerCase());
+        const pool = config.levels[level].filter((t) => !taken.includes(t[0].toLowerCase()) && t !== lastText);
+        if (!pool.length) return;
+        const text = Juegos.pick(pool);
+        lastText = text;
+        const el = document.createElement("div");
+        el.className = "ship";
+        el.dataset.text = text;
+        el.dataset.typed = "0";
+        el.innerHTML = '<svg viewBox="0 0 74 56" aria-hidden="true"><g stroke="#142341" stroke-width="4" stroke-linejoin="round"><path d="M37 4c-10 0-16 10-16 20h32c0-10-6-20-16-20z" fill="#9fe3f0"/><path d="M4 30q33-14 66 0l-8 14H12z" fill="#ad9df0"/><circle cx="22" cy="36" r="3" fill="#ffcc58"/><circle cx="37" cy="38" r="3" fill="#ffcc58"/><circle cx="52" cy="36" r="3" fill="#ffcc58"/><path d="M22 44l-4 9m34-9 4 9" fill="none"/></g></svg>';
+        const label = document.createElement("div");
+        label.className = "label";
+        el.appendChild(label);
+        sky.appendChild(el);
+        // Ships of one wave start one above the other, so they never land together.
+        const ship = { el, label, text, typed: 0, x: 0, y: 90 - order * 90 };
+        drawLabel(ship);
+        // Pick a spot away from the other ships, inside the screen.
+        const width = el.offsetWidth;
+        const room = Math.max(1, innerWidth - width - 40);
+        let best = 20, gap = -1;
+        for (let i = 0; i < 8; i++) {
+          const x = 20 + Math.random() * room;
+          const nearest = Math.min(Infinity, ...alive.map((s) => Math.abs(s.x - x)));
+          if (nearest > gap) { gap = nearest; best = x; }
+        }
+        ship.x = best;
+        alive.push(ship);
+        place(ship);
+      }
+
+      function drawLabel(ship) {
+        const done = document.createElement("span");
+        done.className = "done";
+        done.textContent = ship.text.slice(0, ship.typed);
+        ship.label.replaceChildren(done, ship.text.slice(ship.typed));
+        ship.el.dataset.typed = ship.typed;
+        ship.el.setAttribute("aria-label", ship.text);
+      }
+
+      function place(ship) {
+        // Keep the ship on screen even if the window gets narrower.
+        ship.x = Math.max(20, Math.min(ship.x, innerWidth - ship.el.offsetWidth - 20));
+        ship.el.style.transform = `translate(${ship.x}px, ${ship.y}px)`;
+      }
+
+      window.addEventListener("resize", () => alive.forEach(place));
+
+      function groundY() {
+        return innerHeight - document.getElementById("cannon").getBoundingClientRect().height;
+      }
+
+      function removeShip(ship) {
+        ship.el.remove();
+        alive = alive.filter((s) => s !== ship);
+        if (locked === ship) locked = null;
+      }
+
+      function shoot(ship) {
+        const cannon = document.getElementById("cannon").getBoundingClientRect();
+        const box = ship.el.getBoundingClientRect();
+        const fromX = cannon.left + cannon.width / 2;
+        const fromY = cannon.top + cannon.height * 0.2;
+        const dx = box.left + box.width / 2 - fromX;
+        const dy = box.top + box.height / 2 - fromY;
+        const angle = Math.atan2(dy, dx);
+        barrel.style.transform = `rotate(${(angle * 180) / Math.PI + 90}deg)`;
+        const laser = document.createElement("div");
+        laser.className = "laser";
+        laser.style.left = `${fromX}px`;
+        laser.style.top = `${fromY}px`;
+        laser.style.width = `${Math.hypot(dx, dy)}px`;
+        laser.style.transform = `rotate(${angle}rad)`;
+        document.body.appendChild(laser);
+        // A timer, not animationend: reduced motion has no animation to end.
+        setTimeout(() => laser.remove(), 200);
+      }
+
+      function tick(now) {
+        const dt = Math.min(0.1, (now - lastFrame) / 1000);
+        lastFrame = now;
+        if (playing) {
+          const speed = config.speed * (1 + 0.12 * level);
+          const ground = groundY();
+          for (const ship of [...alive]) {
+            ship.y += speed * dt;
+            place(ship);
+            if (ship.y + ship.el.offsetHeight >= ground) land(ship);
+            if (!playing) break;
+          }
+          untilSpawn -= dt;
+          // An empty sky gets a ship at once, so nobody waits with nothing to type.
+          if (playing && (alive.length === 0 || untilSpawn <= 0)) {
+            for (let i = 0; i < config.wave; i++) {
+              if (alive.length < config.max && destroyed + alive.length < GOALS[level]) spawnOne(i);
+            }
+            untilSpawn = config.every;
+          }
+        }
+        requestAnimationFrame(tick);
+      }
+
+      function land(ship) {
+        const box = ship.el.getBoundingClientRect();
+        Juegos.burst(box.left + box.width / 2, box.bottom, "💥", 6);
+        Juegos.sound.oops();
+        removeShip(ship);
+        hearts--;
+        publish();
+        if (hearts === 0) loseLevel();
+      }
+
+      function startLevel() {
+        for (const ship of [...alive]) removeShip(ship);
+        destroyed = 0;
+        hearts = HEARTS;
+        locked = null;
+        untilSpawn = 0;
+        stats = { keys: 0, correct: 0, streak: 0, best: 0, score: 0, start: performance.now() };
+        // The shared star bar has a fixed size, so each level gets a fresh one.
+        document.querySelector(".progress")?.remove();
+        progress = Juegos.progress(GOALS[level]);
+        publish();
+        playing = true;
+      }
+
+      async function loseLevel() {
+        playing = false;
+        for (const ship of [...alive]) removeShip(ship);
+        await Juegos.overlay("💔", "¡Inténtalo otra vez!");
+        startLevel();
+      }
+
+      function summary() {
+        const minutes = Math.max(1 / 60, (performance.now() - stats.start) / 60000);
+        const lines = [`🚀 ${destroyed} naves`];
+        if (grade >= 2) lines.push(`Puntos: ${stats.score}`);
+        if (grade >= 3) lines.push(`Precisión: ${Math.round((stats.correct / Math.max(1, stats.keys)) * 100)} %`);
+        if (grade === 3 || grade === 4) lines.push(`Pulsaciones por minuto: ${Math.round(stats.correct / minutes)}`);
+        if (grade >= 5) {
+          // Standard typing speed: one word is five keystrokes.
+          const wpm = Math.round(stats.correct / 5 / minutes);
+          lines.push(`Palabras por minuto: ${wpm}`, `Racha más larga: ${stats.best}`);
+          const key = `teclado-record-${grade}`;
+          let record = null;
+          try { record = localStorage.getItem(key); } catch {}
+          if (record === null || wpm > Number(record)) {
+            try { localStorage.setItem(key, String(wpm)); } catch {}
+            lines.push("¡Nuevo récord!");
+          } else {
+            lines.push(`Récord: ${record}`);
+          }
+        }
+        return lines.join("\n");
+      }
+
+      async function finishLevel() {
+        playing = false;
+        for (const ship of [...alive]) removeShip(ship);
+        const last = level === config.levels.length - 1;
+        medals.add(last ? "🏆" : "🏅");
+        await Juegos.celebrate(last ? "🏆" : "🎉", summary());
+        level = Math.min(level + 1, config.levels.length - 1);
+        startLevel();
+      }
+
+      function wrong(ship) {
+        Juegos.sound.oops();
+        stats.streak = 0;
+        const target = ship || alive[0];
+        target.el.classList.add("wrong");
+        clearTimeout(target.flash);
+        target.flash = setTimeout(() => target.el.classList.remove("wrong"), 300);
+      }
+
+      window.addEventListener("keydown", (event) => {
+        if (!playing || event.repeat || event.ctrlKey || event.metaKey) return;
+        // Only keys that write one character count: not Shift, Enter, or the
+        // dead ´ key, which waits for its vowel and then arrives as "á".
+        if (event.key.length !== 1) return;
+        event.preventDefault();
+        if (!alive.length) return;
+        const key = event.key;
+        stats.keys++;
+        // The first key picks the lowest ship that starts with it.
+        const ship = locked || alive
+          .filter((s) => same(s.text[0], key))
+          .sort((a, b) => b.y - a.y)[0];
+        if (!ship || !same(ship.text[ship.typed], key)) return wrong(locked);
+        stats.correct++;
+        stats.streak++;
+        stats.best = Math.max(stats.best, stats.streak);
+        locked = ship;
+        alive.forEach((s) => s.el.classList.toggle("locked", s === ship));
+        ship.typed++;
+        drawLabel(ship);
+        shoot(ship);
+        if (ship.typed < ship.text.length) return Juegos.sound.click();
+        const box = ship.el.getBoundingClientRect();
+        Juegos.burst(box.left + box.width / 2, box.top + box.height / 2, "⭐");
+        Juegos.sound.pop();
+        removeShip(ship);
+        destroyed++;
+        stats.score += ship.text.length * 10;
+        progress.set(destroyed);
+        publish();
+        if (destroyed === GOALS[level]) finishLevel();
+      });
+
+      // Start screen: one green button per grade (keys 1-6 work too).
+      function chooseGrade() {
+        return new Promise((resolve) => {
+          const layer = document.createElement("div");
+          layer.className = "overlay";
+          const big = document.createElement("div");
+          big.className = "big-emoji";
+          big.innerHTML = '<svg width="170" height="130" viewBox="0 0 170 130" aria-hidden="true"><g stroke="#24334b" stroke-width="5" stroke-linejoin="round"><path d="M85 6c-14 0-22 14-22 28h44c0-14-8-28-22-28z" fill="#9fe3f0"/><path d="M30 42q55-22 110 0l-12 20H42z" fill="#ad9df0"/><rect x="20" y="82" width="130" height="42" rx="10" fill="#efaa63"/><path d="M34 96h102M34 110h102M56 82v42m22-42v42m22-42v42m22-42v42" fill="none"/></g></svg>';
+          const line = document.createElement("div");
+          line.className = "overlay-text";
+          line.textContent = "Elige tu curso";
+          const row = document.createElement("div");
+          row.className = "grade-row";
+          const pickGrade = (g) => {
+            Juegos.sound.click();
+            window.removeEventListener("keydown", onKey);
+            layer.remove();
+            resolve(g);
+          };
+          const onKey = (e) => { if (/^[1-6]$/.test(e.key)) pickGrade(Number(e.key)); };
+          for (let g = 1; g <= 6; g++) {
+            const btn = document.createElement("button");
+            btn.className = "play-btn grade-btn";
+            btn.dataset.grade = g;
+            btn.textContent = `${g}º`;
+            btn.setAttribute("aria-label", `Curso ${g}º`);
+            btn.addEventListener("click", () => pickGrade(g));
+            row.appendChild(btn);
+          }
+          window.addEventListener("keydown", onKey);
+          layer.append(big, line, row);
+          document.body.appendChild(layer);
+        });
+      }
+
+      chooseGrade().then((g) => {
+        grade = g;
+        config = GRADES[g];
+        startLevel();
+        lastFrame = performance.now();
+        requestAnimationFrame(tick);
+      });
+    </script>
+  </body>
+</html>
