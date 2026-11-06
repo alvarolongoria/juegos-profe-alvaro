@@ -21,6 +21,8 @@
       .ship .done { color: #22a06b; text-decoration: underline 4px; }
       .ship.locked .label { background: #ffcc58; box-shadow: 0 0 0 4px #fff7e4; }
       .ship.wrong .label { background: #c4b5ef; }
+      .ship.frozen svg { filter: drop-shadow(0 0 8px #9fe3f0); }
+      .ship.frozen .label { background: #b9eff8; border-color: #4c9ec2; }
       #cannon { position: fixed; left: 50%; bottom: 0; width: 120px; height: 96px; margin-left: -60px; z-index: 30; pointer-events: none; }
       #cannon .barrel { transform-origin: 60px 70px; transition: transform 0.08s; }
       .laser { position: fixed; height: 6px; border-radius: 3px; background: #ffcc58; box-shadow: 0 0 10px #ffcc58; transform-origin: 0 50%; z-index: 25; pointer-events: none; animation: fade 0.2s linear forwards; }
@@ -70,31 +72,38 @@
           words("ma me mi mo mu pa pe pi po pu la le li lo lu sa se si so su ta te ti to tu"),
           words("sol pato mesa pala sopa lupa mapa tela palo lima pelo oso ala pie sal mil"),
         ] },
-        2: { speed: 30, every: 3.5, max: 2, wave: 1, levels: [
+        2: { wpm: [4, 5, 6, 8], levels: [
           words("ca co cu ra re ro na ne no fa fe fo ba be bo da de di ga go ja jo va ñu"),
           words("gato casa nube rana vaca lobo foto dedo rosa gota cama bota hilo jugo nido ropa faro"),
           words("sofá árbol café papá mamá ratón avión limón jamón camión lápiz bebé menú sillón melón"),
           words("gato nube rana lobo sofá árbol ratón avión limón camión lápiz bebé"),
         ] },
-        3: { speed: 38, every: 3, max: 3, wave: 1, levels: [
+        3: { wpm: [6, 8, 10, 12], levels: [
           words("planta camino ventana pelota cereza tortuga zapato bosque cocina dibujo escuela granja"),
           words("niño araña montaña señal otoño mañana sueño pañuelo cariño piñata castaña muñeca"),
           words("Madrid Sevilla Lucía Pablo España Marta Toledo Carmen Daniel Elena Valencia Granada"),
           words("canción música plátano lámpara pirámide cámara océano árboles sábado número"),
         ] },
-        5: { speed: 54, every: 2.4, max: 4, wave: 2, levels: [
-          words("bicicleta mariposa chocolate dinosaurio biblioteca calendario elefante tormenta escalera caracola"),
-          words("murciélago helicóptero campeón explicación compañero pequeñito teléfono matemáticas montañero"),
-          words("Barcelona Andalucía Atlántico Mediterráneo Pirineos Cervantes Picasso Europa Canarias Guadalquivir"),
+        5: { wpm: [10, 13, 16, 20], levels: [
+          words("perro gatos nubes libro playa mundo flores planeta bosque pelota cocina camino"),
+          words("araña niños muñeca guerra llaves zapatos juguete jirafa conejo granja zorro lluvia"),
+          words("Pablo Marta Carmen Daniel Elena Samuel Teresa Madrid Sevilla Toledo Granada España"),
           ["El sol brilla", "Me gusta leer", "Hoy hace frío", "Mi perro corre", "La luna sale", "Vamos al parque",
             "Tengo un libro", "Juego con mis amigos", "Las flores huelen bien", "Comemos fruta", "Bebo agua fresca", "Nado en la piscina"],
         ] },
       };
-      // Same content, a little faster: 4º plays like 3º, 6º like 5º.
-      GRADES[4] = { ...GRADES[3], speed: 46, every: 2.6 };
-      GRADES[6] = { ...GRADES[5], speed: 62, every: 2 };
+      // Neighbouring grades share content but have their own typing targets.
+      GRADES[4] = { ...GRADES[3], wpm: [8, 10, 13, 16] };
+      GRADES[6] = { ...GRADES[5], wpm: [12, 16, 20, 24] };
       const GOALS = [5, 7, 9, 12];
       const HEARTS = 3;
+      const SPECIALS = {
+        heart: { text: "vida", name: "Corazón", art: '<path d="M37 49C27 41 10 30 10 20 10 6 27 3 37 15 47 3 64 6 64 20c0 10-17 21-27 29z" fill="#fb7d83"/>' },
+        ice: { text: "hielo", name: "Hielo", art: '<circle cx="37" cy="28" r="23" fill="#b9eff8"/><path d="M37 8v40M19 18l36 20M19 38l36-20M31 12l6 6 6-6M31 44l6-6 6 6M21 25l7-2-2-7M53 31l-7 2 2 7M21 31l7 2-2 7M53 25l-7-2 2-7" fill="none" stroke-linecap="round"/>' },
+        bomb: { text: "bomba", name: "Bomba", art: '<circle cx="35" cy="33" r="19" fill="#52699a"/><path d="M35 14v-5q0-5 8-5" fill="none" stroke-linecap="round"/><path d="M46 3l3 3 4-2-1 5 4 3-5 1-1 5-3-4-5 1 2-5-3-3 5-1z" fill="#ffcc58"/><circle cx="28" cy="27" r="4" fill="#fff7e4" stroke="none"/>' },
+        meteor: { text: null, name: "Meteorito", art: '<path d="M14 5q16 4 25 10L64 6 55 26q7 12-1 22-10 12-26 3-15-8-14-23z" fill="#ffb052"/><circle cx="37" cy="33" r="15" fill="#ad9df0"/><circle cx="32" cy="28" r="3" fill="#fff7e4" stroke="none"/><circle cx="43" cy="38" r="3" fill="#52699a" stroke="none"/>' },
+      };
+      const SHIP_ART = '<path d="M37 4c-10 0-16 10-16 20h32c0-10-6-20-16-20z" fill="#9fe3f0"/><path d="M4 30q33-14 66 0l-8 14H12z" fill="#ad9df0"/><circle cx="22" cy="36" r="3" fill="#ffcc58"/><circle cx="37" cy="38" r="3" fill="#ffcc58"/><circle cx="52" cy="36" r="3" fill="#ffcc58"/><path d="M22 44l-4 9m34-9 4 9" fill="none"/>';
 
       const sky = document.getElementById("sky");
       const livesBox = document.getElementById("lives");
@@ -114,6 +123,9 @@
       let destroyed = 0;
       let hearts = HEARTS;
       let untilSpawn = 0;
+      let interval = 0;
+      let shipsSinceSpecial = 0;
+      let freezeRemaining = 0;
       let lastText = "";
       let stats = null;
       let lastFrame = 0;
@@ -136,24 +148,42 @@
         statsBox.textContent = `Puntos: ${stats ? stats.score : 0}`;
       }
 
-      function spawnOne(order = 0) {
-        // Never two ships that start with the same letter: the first key must pick one.
+      function spawnOne() {
+        // Every object has a unique initial, so the first key selects it unambiguously.
         const taken = alive.map((s) => s.text[0].toLowerCase());
-        const pool = config.levels[level].filter((t) => !taken.includes(t[0].toLowerCase()) && t !== lastText);
-        if (!pool.length) return;
-        const text = Juegos.pick(pool);
-        lastText = text;
+        const letters = words("a e i o u m p l s t").filter((letter) => !taken.includes(letter));
+        let kind = "ship", text = "";
+        if (shipsSinceSpecial >= 3 && !alive.some((s) => s.kind !== "ship")) {
+          const available = Object.keys(SPECIALS).filter((key) => {
+            const word = SPECIALS[key].text;
+            return grade === 1 || !word ? letters.length > 0 : !taken.includes(word[0]);
+          });
+          if (available.length) {
+            kind = Juegos.pick(available);
+            text = grade === 1 || kind === "meteor" ? Juegos.pick(letters) : SPECIALS[kind].text;
+            shipsSinceSpecial = 0;
+          }
+        }
+        if (kind === "ship") {
+          const pool = config.levels[level].filter((t) => !taken.includes(t[0].toLowerCase()) && t !== lastText);
+          if (!pool.length) return;
+          text = Juegos.pick(pool);
+          lastText = text;
+          shipsSinceSpecial++;
+        }
         const el = document.createElement("div");
         el.className = "ship";
+        el.dataset.kind = kind;
         el.dataset.text = text;
         el.dataset.typed = "0";
-        el.innerHTML = '<svg viewBox="0 0 74 56" aria-hidden="true"><g stroke="#142341" stroke-width="4" stroke-linejoin="round"><path d="M37 4c-10 0-16 10-16 20h32c0-10-6-20-16-20z" fill="#9fe3f0"/><path d="M4 30q33-14 66 0l-8 14H12z" fill="#ad9df0"/><circle cx="22" cy="36" r="3" fill="#ffcc58"/><circle cx="37" cy="38" r="3" fill="#ffcc58"/><circle cx="52" cy="36" r="3" fill="#ffcc58"/><path d="M22 44l-4 9m34-9 4 9" fill="none"/></g></svg>';
+        const art = kind === "ship" ? SHIP_ART : SPECIALS[kind].art;
+        el.innerHTML = `<svg viewBox="0 0 74 56" aria-hidden="true"><g stroke="#142341" stroke-width="4" stroke-linejoin="round">${art}</g></svg>`;
         const label = document.createElement("div");
         label.className = "label";
         el.appendChild(label);
         sky.appendChild(el);
-        // Ships of one wave start one above the other, so they never land together.
-        const ship = { el, label, text, typed: 0, x: 0, y: 90 - order * 90 };
+        const ship = { el, label, text, kind, typed: 0, x: 0, y: 90, dx: 0 };
+        if (kind === "ship" && freezeRemaining > 0) el.classList.add("frozen");
         drawLabel(ship);
         // Pick a spot away from the other ships, inside the screen.
         const width = el.offsetWidth;
@@ -165,6 +195,7 @@
           if (nearest > gap) { gap = nearest; best = x; }
         }
         ship.x = best;
+        ship.dx = best < innerWidth / 2 ? 50 : -50;
         alive.push(ship);
         place(ship);
       }
@@ -175,7 +206,7 @@
         done.textContent = ship.text.slice(0, ship.typed);
         ship.label.replaceChildren(done, ship.text.slice(ship.typed));
         ship.el.dataset.typed = ship.typed;
-        ship.el.setAttribute("aria-label", ship.text);
+        ship.el.setAttribute("aria-label", ship.kind === "ship" ? ship.text : `${SPECIALS[ship.kind].name}: ${ship.text}`);
       }
 
       function place(ship) {
@@ -220,21 +251,29 @@
         const dt = Math.min(0.1, (now - lastFrame) / 1000);
         lastFrame = now;
         if (playing) {
-          const speed = config.speed * (1 + 0.12 * level);
           const ground = groundY();
+          const frozenAtStart = freezeRemaining;
+          freezeRemaining = Math.max(0, freezeRemaining - dt);
           for (const ship of [...alive]) {
-            ship.y += speed * dt;
+            // From 2º onwards a normal descent lasts twice the spawn interval.
+            // Recalculate from the actual ground and object height on every frame.
+            const speed = grade === 1 ? config.speed * (1 + 0.12 * level)
+              : Math.max(1, ground - 90 - ship.el.offsetHeight) / (2 * interval);
+            const moving = ship.kind === "ship" ? Math.max(0, dt - frozenAtStart) : dt;
+            ship.el.classList.toggle("frozen", ship.kind === "ship" && freezeRemaining > 0);
+            ship.y += speed * (ship.kind === "meteor" ? 3 : 1) * moving;
+            if (ship.kind === "meteor") ship.x += ship.dx * dt;
             place(ship);
             if (ship.y + ship.el.offsetHeight >= ground) land(ship);
             if (!playing) break;
           }
           untilSpawn -= dt;
-          // An empty sky gets a ship at once, so nobody waits with nothing to type.
+          // An empty sky gets an object at once, even between scheduled spawns.
+          const max = grade === 1 ? config.max : 2;
+          const normalCount = alive.filter((s) => s.kind === "ship").length;
           if (playing && (alive.length === 0 || untilSpawn <= 0)) {
-            for (let i = 0; i < config.wave; i++) {
-              if (alive.length < config.max && destroyed + alive.length < GOALS[level]) spawnOne(i);
-            }
-            untilSpawn = config.every;
+            if (alive.length < max && destroyed + normalCount < GOALS[level]) spawnOne();
+            untilSpawn = interval;
           }
         }
         requestAnimationFrame(tick);
@@ -243,8 +282,10 @@
       function land(ship) {
         const box = ship.el.getBoundingClientRect();
         Juegos.burst(box.left + box.width / 2, box.bottom, "💥", 6);
-        Juegos.sound.oops();
         removeShip(ship);
+        // Specials are opportunities, never a penalty if the player misses them.
+        if (ship.kind !== "ship") return;
+        Juegos.sound.oops();
         hearts--;
         publish();
         if (hearts === 0) loseLevel();
@@ -256,6 +297,11 @@
         hearts = HEARTS;
         locked = null;
         untilSpawn = 0;
+        shipsSinceSpecial = 0;
+        freezeRemaining = 0;
+        const pool = config.levels[level];
+        const averageChars = pool.reduce((total, text) => total + text.length, 0) / pool.length;
+        interval = grade === 1 ? config.every : averageChars * 12 / config.wpm[level];
         stats = { keys: 0, correct: 0, streak: 0, best: 0, score: 0, start: performance.now() };
         // The shared star bar has a fixed size, so each level gets a fresh one.
         document.querySelector(".progress")?.remove();
@@ -304,6 +350,34 @@
         startLevel();
       }
 
+      function completeTarget(ship) {
+        const box = ship.el.getBoundingClientRect();
+        Juegos.burst(box.left + box.width / 2, box.top + box.height / 2, "⭐");
+        Juegos.sound.pop();
+        removeShip(ship);
+        stats.score += ship.text.length * 10;
+        if (ship.kind === "ship") {
+          destroyed++;
+        } else if (ship.kind === "heart") {
+          if (hearts < HEARTS) hearts++;
+          else stats.score += 50;
+        } else if (ship.kind === "ice") {
+          freezeRemaining = 5;
+          alive.filter((s) => s.kind === "ship").forEach((s) => s.el.classList.add("frozen"));
+        } else if (ship.kind === "bomb") {
+          for (const target of [...alive].filter((s) => s.kind === "ship")) {
+            removeShip(target);
+            destroyed++;
+            stats.score += target.text.length * 10;
+          }
+        } else if (ship.kind === "meteor") {
+          stats.score += 50;
+        }
+        progress.set(destroyed);
+        publish();
+        if (destroyed >= GOALS[level]) finishLevel();
+      }
+
       function wrong(ship) {
         Juegos.sound.oops();
         stats.streak = 0;
@@ -336,15 +410,7 @@
         drawLabel(ship);
         shoot(ship);
         if (ship.typed < ship.text.length) return Juegos.sound.click();
-        const box = ship.el.getBoundingClientRect();
-        Juegos.burst(box.left + box.width / 2, box.top + box.height / 2, "⭐");
-        Juegos.sound.pop();
-        removeShip(ship);
-        destroyed++;
-        stats.score += ship.text.length * 10;
-        progress.set(destroyed);
-        publish();
-        if (destroyed === GOALS[level]) finishLevel();
+        completeTarget(ship);
       });
 
       // Start screen: one green button per grade (keys 1-6 work too).
