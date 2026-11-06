@@ -21,9 +21,10 @@
     .card:active { transform: translateY(5px); }
     .card:focus-visible { outline: 5px solid #24334b; outline-offset: 4px; }
 
-    /* Game of the day: one big card in the middle, four small cards on each side. */
+    /* Game of the day: one big card in the middle, three small cards on each side
+       and the last three in a row below, so every card keeps its 100px height. */
     .games.has-today { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); grid-auto-rows: 100px; }
-    .card.today { grid-column: 2; grid-row: 1 / span 4; display: block; padding: 0; overflow: hidden; border-width: 5px; border-radius: 40px; box-shadow: 0 12px #24334b; background: #34456e; }
+    .card.today { grid-column: 2; grid-row: 1 / span 3; display: block; padding: 0; overflow: hidden; border-width: 5px; border-radius: 40px; box-shadow: 0 12px #24334b; background: #34456e; }
     .card.today svg { width: 100%; height: 100%; border: 0; border-radius: 0; }
     .card.today .label { position: absolute; top: 86px; left: 50%; transform: translateX(-50%); padding: 6px 20px; border: 4px solid #24334b; border-radius: 30px; background: #fff7e4; box-shadow: 0 4px #24334b; font-size: 28px; font-weight: 800; white-space: nowrap; }
     .card.today::before { content: "¡Juego de hoy!"; position: absolute; z-index: 1; top: 22px; left: 50%; transform: translateX(-50%); padding: 6px 20px; border: 4px solid #24334b; border-radius: 30px; background: #ffda55; box-shadow: 0 4px #24334b; font-size: 28px; font-weight: 800; white-space: nowrap; }
@@ -116,6 +117,14 @@
         <g stroke="#24334b" stroke-width="4" stroke-linejoin="round"><path d="M0 61h320M22 23v74m47-74v74m47-74v74m47-74v74m47-74v74m47-74v74m47-74v74" stroke="#fff7e4" stroke-width="12"/><ellipse cx="147" cy="177" rx="69" ry="18" fill="#805047"/><path fill="#b98a70" d="M99 173v-47q0-47 48-47t48 47v47"/><circle cx="102" cy="102" r="14" fill="#b98a70"/><circle cx="191" cy="102" r="14" fill="#b98a70"/><ellipse cx="147" cy="140" rx="28" ry="22" fill="#f4d7b6"/><ellipse cx="147" cy="131" rx="10" ry="7" fill="#f07599"/></g><g fill="#24334b"><circle cx="127" cy="117" r="5"/><circle cx="167" cy="117" r="5"/></g><path d="M25 162v-24m-10 11h20m220-25v-24m-10 11h20" stroke="#ffda55" stroke-width="6"/>
       </svg>
     <span class="label" aria-hidden="true">Atrapa el Topo</span>
+    </a>
+    <a class="card" href="juegos/teclado.html" aria-label="Naves del teclado">
+      <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+        <path fill="#24334b" d="M0 0h320v210H0z"/><g fill="#fff7e4"><circle cx="40" cy="34" r="4"/><circle cx="280" cy="52" r="4"/><circle cx="250" cy="140" r="3"/><circle cx="60" cy="130" r="3"/></g>
+        <g stroke="#142341" stroke-width="4" stroke-linejoin="round"><g transform="translate(0 46)"><path fill="#9fe3f0" d="M160 18c-14 0-22 13-22 26h44c0-13-8-26-22-26z"/><path fill="#ad9df0" d="M108 52q52-22 104 0l-11 18h-82z"/><rect x="138" y="80" width="44" height="34" rx="10" fill="#fff7e4"/></g><path fill="#52699a" d="M0 190q160-26 320 0v20H0z"/><path fill="#fb7d83" d="M154 168h12v22h-12z"/><path fill="#ffcc58" d="M132 206v-10q28-22 56 0v10z"/></g>
+        <path d="M152 150l8-18 8 18m-12-6h8" fill="none" stroke="#24334b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    <span class="label" aria-hidden="true">Naves del teclado</span>
     </a>
     <a class="card" href="juegos/pinta.html" aria-label="Pinta el Camino">
       <svg viewBox="0 0 320 210" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">

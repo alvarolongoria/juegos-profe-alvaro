@@ -8,13 +8,13 @@ const games = [
   ['monstruos', 'Fábrica de monstruos'], ['cohete', 'Cohete saltarín'],
   ['piano', 'Piano de letras'], ['carrera', 'Gran Carrera'],
   ['hamburgueseria', 'La Hamburguesería'], ['topos', 'Atrapa el Topo'],
-  ['pinta', 'Pinta el Camino'],
+  ['teclado', 'Naves del teclado'], ['pinta', 'Pinta el Camino'],
 ];
 const sizes = [[1366, 768], [1024, 600]];
 (async () => {
   const portal = await openGame('index.html');
   const { page } = portal;
-  check(await page.locator('main a').count() === 9, 'exactly nine game links');
+  check(await page.locator('main a').count() === 10, 'exactly ten game links');
   for (const [id, name] of games) {
     const link = page.getByRole('link', { name, exact: true });
     check(await link.getAttribute('href') === `juegos/${id}.html`, `${id}: accessible name and destination`);
@@ -41,7 +41,7 @@ const sizes = [[1366, 768], [1024, 600]];
   for (const [id] of games) {
     const ctx = await openGame(`juegos/${id}.html`);
     await ctx.page.emulateMedia({ reducedMotion: 'reduce' });
-    check(await ctx.page.locator('.play-btn').evaluate(el => getComputedStyle(el).animationName === 'none'), `${id}: reduced-motion play`);
+    check(await ctx.page.locator('.play-btn').first().evaluate(el => getComputedStyle(el).animationName === 'none'), `${id}: reduced-motion play`);
     if (id === 'estrellas') {
       for (const [width, height] of sizes) {
         await ctx.page.setViewportSize({ width, height });

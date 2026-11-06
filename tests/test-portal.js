@@ -8,20 +8,20 @@ const { openGame, check, finish } = require('./helpers');
   // The game of the day is stable within a day, changes over days and reaches every game.
   const stats = await page.evaluate(() => {
     const day = new Date(2026, 9, 28);
-    const same = Portal.dailyIndex(new Date(2026, 9, 28, 8, 0), 9) === Portal.dailyIndex(new Date(2026, 9, 28, 23, 59), 9);
+    const same = Portal.dailyIndex(new Date(2026, 9, 28, 8, 0), 10) === Portal.dailyIndex(new Date(2026, 9, 28, 23, 59), 10);
     const seen = new Set();
     let inRange = true;
     for (let i = 0; i < 400; i++) {
       const d = new Date(day.getTime() + i * 86400000);
-      const idx = Portal.dailyIndex(d, 9);
-      if (!(idx >= 0 && idx < 9)) inRange = false;
+      const idx = Portal.dailyIndex(d, 10);
+      if (!(idx >= 0 && idx < 10)) inRange = false;
       seen.add(idx);
     }
     return { same, inRange, seen: seen.size };
   });
   check(stats.same, 'game of the day is stable within a day');
   check(stats.inRange, 'game of the day index is always a valid game');
-  check(stats.seen === 9, 'every game can be the game of the day');
+  check(stats.seen === 10, 'every game can be the game of the day');
 
   // Exactly one featured card, and it is today's game; the DOM order is untouched.
   check(await page.locator('main a.card.today').count() === 1, 'exactly one game of the day');
