@@ -367,7 +367,7 @@
       const plate = document.querySelector(".plate");
       const tray = document.querySelector(".tray");
       const progress = Juegos.progress(BURGERS_PER_LEVEL);
-      const medals = Juegos.medals();
+      const trophies = Juegos.trophies(LEVELS.length);
       Juegos.homeButton();
       Juegos.guardRightClick();
 
@@ -443,9 +443,7 @@
       }
 
       async function finishLevel() {
-        const last = level === LEVELS.length - 1;
-        medals.add(last ? "🏆" : "🏅");
-        await Juegos.celebrate(last ? "🏆" : "🎉");
+        await trophies.award(level);
         level = Math.min(level + 1, LEVELS.length - 1);
         startLevel();
       }

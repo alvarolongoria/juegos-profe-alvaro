@@ -180,7 +180,7 @@
       const DRAWINGS = [rainbow, flower, fish];
 
       const progress = Juegos.progress(DRAWINGS_PER_LEVEL);
-      const medals = Juegos.medals();
+      const trophies = Juegos.trophies(ZONES_PER_LEVEL.length);
       Juegos.homeButton();
       Juegos.guardRightClick();
 
@@ -230,9 +230,7 @@
       async function finishLevel() {
         current.remove();
         current = null;
-        const last = level >= ZONES_PER_LEVEL.length - 1;
-        medals.add(last ? "🏆" : "🏅");
-        await Juegos.celebrate(last ? "🏆" : "🎉");
+        await trophies.award(level);
         level = Math.min(level + 1, ZONES_PER_LEVEL.length - 1);
         startLevel();
       }

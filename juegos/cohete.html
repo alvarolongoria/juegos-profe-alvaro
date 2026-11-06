@@ -114,7 +114,7 @@
       const enterKey = document.querySelector('#enter-key');
       const spaceKey = document.querySelector('#space-key');
       let progress = null;
-      const medals = Juegos.medals();
+      const trophies = Juegos.trophies(LEVELS.length);
       Juegos.homeButton();
       Juegos.guardRightClick();
       let level = 0, successes = 0, missed = 0, hops = 0, starSequence = 0;
@@ -279,9 +279,7 @@
         items.forEach(item => item.el.remove());
         items = [];
         if (won) {
-          const last = level === LEVELS.length - 1;
-          medals.add(last ? '🏆' : '🏅');
-          await Juegos.celebrate(last ? '🏆' : '🎉', line);
+          await trophies.award(level, { text: line });
           level = Math.min(level + 1, LEVELS.length - 1);
         } else {
           Juegos.sound.oops();

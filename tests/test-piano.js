@@ -7,6 +7,7 @@ const { openGame, pressPlay, check, finish } = require("./helpers");
   const target = () => page.locator("#target").textContent();
   const score = () => page.locator(".progress span.on").count();
   await pressPlay(page);
+  check(await page.locator('.trophy-slot').count() === 4 && await page.locator('.trophy-slot[data-filled="true"]').count() === 0, 'four trophy slots start empty');
   check(await page.locator('[data-key="Ñ"]').count() === 1, "Spanish keyboard includes Ñ");
   const first = await target();
   // Playwright's key map lacks ñ; dispatch the browser's Spanish key value instead.
@@ -54,13 +55,15 @@ const { openGame, pressPlay, check, finish } = require("./helpers");
       if (success < goal - 1) check(await page.locator(".overlay").count() === 0, "no early level completion");
     }
     check(await page.locator(".overlay").count() === 1, `level ${level + 1}: ${goal} successes celebrate`);
-    check(await page.locator(".medals").textContent() === "🏅".repeat(Math.min(level + 1, 3)) + (level === 3 ? "🏆" : ""), `level ${level + 1}: medal awarded`);
+    check(await page.locator('.overlay .big-emoji svg').count() === 1, `level ${level + 1}: award shown large`);
     if (level === 0) check([...seen].sort().join("") === "AEIOU", "level 1 shows every vowel");
     if (level === 1) check([...seen].sort().join("") === "LMPST", "level 2 shows exactly M P L S T");
     if (level === 2) check([...seen].sort().join("") === "123456789", "level 3 shows every number from 1 to 9");
     await pressKey(await target());
     check(await score() === goal, "celebration ignores keyboard input");
     await pressPlay(page);
+    check(await page.locator('.trophy-slot[data-filled="true"]').count() === level + 1, `level ${level + 1}: award fills its slot`);
+    check(await page.locator('.trophy-slot').nth(level).getAttribute('data-award') === ['bronze', 'silver', 'gold', 'cup'][level], `level ${level + 1}: correct award`);
     check(await score() === 0, "next round resets progress");
   }
   // Level 4 begins with Ñ so its physical-key coverage is deterministic.
@@ -74,5 +77,8 @@ const { openGame, pressPlay, check, finish } = require("./helpers");
   check(await page.locator('#keyboard-hint').isVisible() && await score() === 0, 'reduced-motion click hint stays visible and never scores');
   await pressKey(await target());
   check(await page.locator('#feedback').isVisible() && await page.locator('#feedback').textContent() === '✓', 'success feedback remains visible under reduced motion');
+  for (let i = 1; i < 12; i++) await pressKey(await target());
+  await pressPlay(page);
+  check(await page.locator('.trophy-slot').count() === 4 && await page.locator('.trophy-slot').last().getAttribute('data-count') === '2', 'repeating the last level counts another trophy without adding slots');
   await finish(game);
 })().catch(error => { console.error(error); process.exit(1); });

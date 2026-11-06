@@ -70,7 +70,7 @@
     const monster = document.querySelector('.monster');
     const tray = document.querySelector('.tray');
     let progress = null;
-    const medals = Juegos.medals();
+    const trophies = Juegos.trophies(LEVELS.length);
     Juegos.homeButton();
     Juegos.guardRightClick();
     let level = 0;
@@ -177,9 +177,7 @@
     }
     async function finishLevel() {
       playing = false;
-      const last = level === LEVELS.length - 1;
-      medals.add(last ? '🏆' : '🏅');
-      await Juegos.celebrate(last ? '🏆' : '🎉');
+      await trophies.award(level);
       level = Math.min(level + 1, LEVELS.length - 1);
       startLevel();
     }

@@ -132,6 +132,85 @@ const Juegos = (() => {
     };
   }
 
+  // A fixed case: slots represent levels, not an ever-growing list of wins.
+  // Race games may override the award with the prize for the child's place.
+  function trophies(levelCount, { label = "Nivel" } = {}) {
+    if (levelCount !== 3 && levelCount !== 4) throw new RangeError("Expected 3 or 4 trophy slots");
+    const sequence = levelCount === 3 ? ["bronze", "gold", "cup"] : ["bronze", "silver", "gold", "cup"];
+    const names = { bronze: "bronce", silver: "plata", gold: "oro", cup: "trofeo", participation: "medalla" };
+    const colors = { bronze: "#c97d43", silver: "#b7c6d0", gold: "#ffcc58", cup: "#ffcc58", participation: "#55cbd1" };
+    const box = document.createElement("div");
+    box.className = "trophies";
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", "Vitrina de premios");
+    document.body.appendChild(box);
+
+    // Inline SVG avoids missing emoji fonts on school computers and headless Chrome.
+    function icon(prize) {
+      const el = document.createElement("span");
+      el.className = "trophy-icon";
+      el.innerHTML = prize === "cup"
+        ? `<svg viewBox="0 0 64 80" aria-hidden="true"><g stroke="#24334b" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><path d="M17 17H6v5c0 12 8 17 17 17M47 17h11v5c0 12-8 17-17 17" fill="none"/><path d="M17 9h30v19c0 14-7 21-15 21s-15-7-15-21z" fill="#ffcc58"/><path d="M32 49v12M22 62h20l3 9H19z" fill="#e9a941"/><path d="m32 19 2.5 5 5.5.8-4 4 .9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-4 5.5-.8z" fill="#fff7e4"/></g></svg>`
+        : `<svg viewBox="0 0 64 80" aria-hidden="true"><g stroke="#24334b" stroke-width="3" stroke-linejoin="round"><path d="M12 7h15l10 26-13 6z" fill="#ef6b61"/><path d="M37 7h15L40 39l-13-6z" fill="#55cbd1"/><circle cx="32" cy="49" r="21" fill="${colors[prize]}"/><circle cx="32" cy="49" r="16" fill="none" opacity=".35"/><path d="m32 36 3.7 7.5 8.3 1.2-6 5.9 1.4 8.3-7.4-3.9-7.4 3.9 1.4-8.3-6-5.9 8.3-1.2z" fill="#fff7e4"/></g></svg>`;
+      return el;
+    }
+
+    const counts = sequence.map(() => 0);
+    const slots = sequence.map((prize, index) => {
+      const slot = document.createElement("div");
+      slot.className = "trophy-slot";
+      slot.dataset.award = prize;
+      slot.dataset.filled = "false";
+      slot.setAttribute("role", "img");
+      slot.setAttribute("aria-label", `${label} ${index + 1}: pendiente`);
+      slot.appendChild(icon(prize));
+      box.appendChild(slot);
+      return slot;
+    });
+
+    return {
+      async award(index, { prize = sequence[index], text } = {}) {
+        if (!Number.isInteger(index) || !slots[index] || !Object.hasOwn(names, prize)) {
+          throw new RangeError("Invalid trophy slot or prize");
+        }
+        const slot = slots[index];
+        const big = icon(prize);
+        big.setAttribute("role", "img");
+        big.setAttribute("aria-label", names[prize]);
+        const celebration = celebrate(big, text);
+        const from = big.getBoundingClientRect();
+        await celebration;
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          const to = slot.getBoundingClientRect();
+          const flying = icon(prize);
+          flying.classList.add("trophy-flight");
+          Object.assign(flying.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px` });
+          document.body.appendChild(flying);
+          const dx = to.left + to.width / 2 - from.left - from.width / 2;
+          const dy = to.top + to.height / 2 - from.top - from.height / 2;
+          const animation = flying.animate([
+            { transform: "translate(0, 0) scale(1)" },
+            { transform: `translate(${dx}px, ${dy}px) scale(${Math.min(to.width / from.width, to.height / from.height)})` },
+          ], { duration: 700, easing: "ease-in-out", fill: "forwards" });
+          await animation.finished.catch(() => {});
+          flying.remove();
+        }
+        counts[index]++;
+        slot.dataset.award = prize;
+        slot.dataset.filled = "true";
+        slot.dataset.count = String(counts[index]);
+        slot.setAttribute("aria-label", `${label} ${index + 1}: ${names[prize]}${counts[index] > 1 ? `, ${counts[index]} veces` : ""}`);
+        slot.replaceChildren(icon(prize));
+        if (counts[index] > 1) {
+          const count = document.createElement("span");
+          count.className = "trophy-count";
+          count.textContent = `×${counts[index]}`;
+          slot.appendChild(count);
+        }
+      },
+    };
+  }
+
   // Overlay with a big emoji (or element), an optional result line and a green
   // play button. Resolves on click.
   function overlay(emoji, text) {
@@ -202,5 +281,5 @@ const Juegos = (() => {
     return list[Math.floor(Math.random() * list.length)];
   }
 
-  return { sound, burst, confetti, homeButton, progress, medals, overlay, startScreen, celebrate, guardRightClick, bubbleIcon, random, pick };
+  return { sound, burst, confetti, homeButton, progress, medals, trophies, overlay, startScreen, celebrate, guardRightClick, bubbleIcon, random, pick };
 })();

@@ -60,10 +60,10 @@ async function placed(page) {
     await page.waitForSelector(".overlay");
     const place1 = Number(await page.evaluate(() => document.body.dataset.place));
     check(place1 >= 2, `slow race: real rivals can beat you (place ${place1})`);
-    check((await page.locator(".overlay .podium").count()) === 1, "finish shows the podium");
-    check((await page.locator(".medals").textContent()).length >= 1, "every finish gets a prize");
+    check(await page.locator('.overlay .big-emoji svg').count() === 1 && await page.locator('.overlay .overlay-text').textContent() === `${place1}º puesto`, 'finish shows the prize and race place');
     const pace1 = Number(await page.locator(".racer.rival").first().getAttribute("data-pace"));
     await pressPlay(page);
+    check(await page.locator('.trophy-slot').first().getAttribute('data-filled') === 'true' && await page.locator('.trophy-slot').first().getAttribute('data-award') === ['gold', 'silver', 'bronze', 'participation'][place1 - 1], 'first race slot shows the actual prize for its place');
 
     // Race 2: fast answers win; rivals are faster than in race 1.
     const pace2 = Number(await page.locator(".racer.rival").first().getAttribute("data-pace"));
@@ -75,8 +75,9 @@ async function placed(page) {
     }
     await page.waitForSelector(".overlay");
     check((await page.evaluate(() => document.body.dataset.place)) === "1", "fast race: first place");
-    check((await page.locator(".medals").textContent()).includes("🥇"), "first place gets the gold medal");
+    check(await page.locator('.overlay .big-emoji svg').count() === 1 && await page.locator('.overlay .overlay-text').textContent() === '1º puesto', 'first place celebrates with its prize');
     await pressPlay(page);
+    check(await page.locator('.trophy-slot').nth(1).getAttribute('data-award') === 'gold' && await page.locator('.trophy-slot').nth(1).getAttribute('data-filled') === 'true', 'second race slot records the gold medal');
 
     // Keys that are not an answer do nothing.
     q = await question(page);

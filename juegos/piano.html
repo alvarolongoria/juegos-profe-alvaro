@@ -73,7 +73,7 @@
       const ROWS = ["1234567890", "QWERTYUIOP", "ASDFGHJKLÑ", "ZXCVBNM"];
       const PITCHES = "ABCDEFGHIJKLMNOPQRSTUVWXYZÑ1234567890";
       let progress = null;
-      const medals = Juegos.medals();
+      const trophies = Juegos.trophies(LEVELS.length);
       const target = document.getElementById("target");
       const feedback = document.getElementById('feedback');
       const keyboardHint = document.getElementById('keyboard-hint');
@@ -151,9 +151,7 @@
 
       async function finishLevel() {
         playing = false;
-        const last = level === LEVELS.length - 1;
-        medals.add(last ? "🏆" : "🏅");
-        await Juegos.celebrate(last ? "🏆" : "🎉");
+        await trophies.award(level);
         level = Math.min(level + 1, LEVELS.length - 1);
         startLevel();
       }

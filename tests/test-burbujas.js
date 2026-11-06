@@ -37,8 +37,9 @@ async function popUntilOverlay(page) {
     sizes.push(await page.locator(".bubble:not(.popping)").first().evaluate((el) => el.offsetWidth));
     await popUntilOverlay(page);
     check((await page.locator(".progress span.on").count()) === goal, `level ${level}: ${goal} stars lit`);
-    check((await page.locator(".medals").textContent()).length >= level, `level ${level}: medal awarded`);
+    check(await page.locator('.overlay .big-emoji svg').count() === 1, `level ${level}: award shown large`);
     await pressPlay(page);
+    check(await page.locator('.trophy-slot[data-filled="true"]').count() === level, `level ${level}: award fills its slot`);
   }
   check(sizes.every((size, i) => i === 0 || size < sizes[i - 1]), `bubbles get smaller every level (${sizes.join(" -> ")})`);
 

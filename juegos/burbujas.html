@@ -88,7 +88,7 @@
       const INSIDE = ["", "", "🐟", "🦋", "⭐", "🐞", "🍓", "🌸"];
 
       let progress = null;
-      const medals = Juegos.medals();
+      const trophies = Juegos.trophies(LEVELS.length);
       Juegos.homeButton();
       Juegos.guardRightClick();
 
@@ -152,9 +152,7 @@
         playing = false;
         bubbles.forEach((b) => b.el.remove());
         bubbles = [];
-        const lastLevel = level === LEVELS.length - 1;
-        medals.add(lastLevel ? "🏆" : "🏅");
-        await Juegos.celebrate(lastLevel ? "🏆" : "🎉");
+        await trophies.award(level);
         level = Math.min(level + 1, LEVELS.length - 1);
         startLevel();
       }

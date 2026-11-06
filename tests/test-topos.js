@@ -66,8 +66,9 @@ async function whackNext(page) {
         }
       }
       await page.waitForSelector(".overlay");
-      check((await page.locator(".medals").textContent()) === "🏅".repeat(level), `level ${level}: medal awarded`);
+      check(await page.locator('.overlay .big-emoji svg').count() === 1, `level ${level}: award shown large`);
       await pressPlay(page);
+      check(await page.locator('.trophy-slot[data-filled="true"]').count() === level, `level ${level}: award fills its slot`);
     }
     check((await goalShown()) === 12, `level 4: asks for 12 hits (${await goalShown()})`);
     const show4 = Number(await page.locator("body").getAttribute("data-show"));

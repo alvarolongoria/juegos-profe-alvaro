@@ -87,8 +87,9 @@ async function hold(page) {
         if (level === 1 && n === 1) check((await page.locator(".particle").count()) >= 1, "a catch bursts into sparkles");
       }
       await page.waitForSelector(".overlay");
-      check((await page.locator(".medals").textContent()) === "🏅".repeat(level), `level ${level}: medal awarded`);
+      check(await page.locator('.overlay .big-emoji svg').count() === 1, `level ${level}: award shown large`);
       await pressPlay(page);
+      check(await page.locator('.trophy-slot[data-filled="true"]').count() === level, `level ${level}: award fills its slot`);
       await page.waitForSelector(".star-target");
     }
     check((await page.locator(".progress span").count()) === 12, `level 4: asks for 12 catches (${await page.locator(".progress span").count()})`);

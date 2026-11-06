@@ -58,8 +58,9 @@ async function center(locator) {
     }
     check(await page.locator('.monster.dancing').count() === 1, `level ${level}: ends with a whole monster`);
     await page.waitForSelector('.overlay');
-    check(await page.locator('.medals').textContent() === '🏅'.repeat(Math.min(level, 2)) + (level === 3 ? '🏆' : ''), `level ${level}: correct medal`);
+    check(await page.locator('.overlay .big-emoji svg').count() === 1, `level ${level}: award shown large`);
     await pressPlay(page);
+    check(await page.locator('.trophy-slot[data-filled="true"]').count() === level && await page.locator('.trophy-slot').nth(level - 1).getAttribute('data-award') === ['bronze', 'gold', 'cup'][level - 1], `level ${level}: correct award fills its slot`);
   }
   check(counts.join(',') === '3,4,5', 'levels increase from three to five slots');
   check(await page.locator('.slot').count() === 5, 'last level repeats');

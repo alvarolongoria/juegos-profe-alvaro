@@ -230,7 +230,7 @@
       });
 
       let progress = null;
-      const medals = Juegos.medals();
+      const trophies = Juegos.trophies(LEVELS.length);
       Juegos.homeButton();
       Juegos.guardRightClick();
 
@@ -276,9 +276,7 @@
         playing = false;
         clearTimeout(spawnTimer);
         setTimeout(() => moles.forEach(hide), 500);
-        const last = level === LEVELS.length - 1;
-        medals.add(last ? "🏆" : "🏅");
-        await Juegos.celebrate(last ? "🏆" : "🎉");
+        await trophies.award(level);
         level = Math.min(level + 1, LEVELS.length - 1);
         startLevel();
       }

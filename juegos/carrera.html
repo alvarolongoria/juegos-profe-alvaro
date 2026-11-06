@@ -454,7 +454,7 @@
         { body: "#22c55e", helmet: "#fb923c", seconds: 90 },
         { body: "#f59e0b", helmet: "#a78bfa", seconds: 105 },
       ];
-      const PRIZES = ["🥇", "🥈", "🥉", "🏅"];
+      const PRIZES = ["gold", "silver", "bronze", "participation"];
       const PLACE_TEXT = ["1º", "2º", "3º", "4º"];
       const GOAL = 10;
 
@@ -466,7 +466,7 @@
       const mascotBox = document.querySelector(".mascot-box");
       mascotBox.innerHTML = mascotSvg();
       const progress = Juegos.progress(GOAL);
-      const medals = Juegos.medals();
+      const trophies = Juegos.trophies(4, { label: "Carrera" });
       Juegos.homeButton();
       Juegos.guardRightClick();
 
@@ -581,14 +581,7 @@
         document.body.dataset.place = String(place);
         await new Promise((resolve) => setTimeout(resolve, 700));
         player.el.dataset.finished = "1";
-        medals.add(PRIZES[place - 1]);
-        const podium = document.createElement("div");
-        podium.className = "podium";
-        podium.append(
-          Object.assign(document.createElement("div"), { textContent: PRIZES[place - 1] }),
-          Object.assign(document.createElement("div"), { className: "place", textContent: PLACE_TEXT[place - 1] })
-        );
-        await Juegos.celebrate(podium);
+        await trophies.award(Math.min(race, 3), { prize: PRIZES[place - 1], text: `${PLACE_TEXT[place - 1]} puesto` });
         race++;
         startRace();
       }

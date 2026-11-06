@@ -25,6 +25,8 @@ async function openGame(file) {
 async function pressPlay(page) {
   await page.waitForSelector(".overlay .play-btn");
   await page.click(".overlay .play-btn", { force: true });
+  // Award celebrations finish only after their flight has reached the case.
+  await page.locator(".trophy-flight").waitFor({ state: "hidden" });
 }
 
 function check(condition, message) {

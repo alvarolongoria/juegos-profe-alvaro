@@ -83,8 +83,9 @@ async function paintDrawing(page) {
         }
       }
       await page.waitForSelector(".overlay");
-      check((await page.locator(".medals").textContent()) === "🏅".repeat(level), `level ${level}: medal awarded`);
+      check(await page.locator('.overlay .big-emoji svg').count() === 1, `level ${level}: award shown large`);
       await pressPlay(page);
+      check(await page.locator('.trophy-slot[data-filled="true"]').count() === level, `level ${level}: award fills its slot`);
     }
     await page.waitForSelector(".drawing:not(.alive) .zone");
     zones.push(await page.locator(".drawing .zone").count());

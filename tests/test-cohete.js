@@ -19,6 +19,7 @@ function readState(page) {
       overlay: document.querySelector(".overlay")
         ? {
             emoji: document.querySelector(".overlay .big-emoji").textContent,
+            hasAward: !!document.querySelector(".overlay .big-emoji svg"),
             text: document.querySelector(".overlay .overlay-text")?.textContent || "",
           }
         : null,
@@ -119,7 +120,7 @@ async function flyLevel(page, timeoutMs) {
     check(failEmoji === "💥", "the third bump ends the level");
     check((await page.locator("#world").getAttribute("data-lives")) === "0", "the third bump empties the hearts");
     check(/Has volado \d+ metros · Récord: \d+ metros/.test(failText), `losing shows the distance flown (${failText})`);
-    check((await page.locator(".medals").textContent()) === "", "losing awards no medal");
+    check(await page.locator('.trophy-slot[data-filled="true"]').count() === 0, "losing awards no medal");
     await pressPlay(page);
     check((await page.locator("#world").getAttribute("data-state")) === "ready", "losing restarts the level on the pad");
     check((await page.locator("#world").getAttribute("data-lives")) === "3", "the restarted level gives three hearts again");
@@ -130,15 +131,15 @@ async function flyLevel(page, timeoutMs) {
     const won = await flyLevel(page, 180000);
     check(won !== null, "the level can be finished");
     check(won && won.stars === 5, `five caught stars finish level one (${won && won.stars})`);
-    check(won && won.overlay.emoji.includes("🎉"), "finishing the level celebrates");
+    check(won && won.overlay.hasAward, "finishing the level celebrates with a large award");
     check(won && /Has volado \d+ metros · Récord: \d+ metros/.test(won.overlay.text), `the level end reports metres and the record (${won && won.overlay.text})`);
     const shownMetres = Number((won && won.overlay.text.match(/Has volado (\d+) metros/) || [])[1]);
     check(shownMetres > 0 && shownMetres === Number((won && won.overlay.text.match(/Récord: (\d+) metros/) || [])[1]), "the first distance sets the record");
-    check((await page.locator(".medals").textContent()).includes("🏅"), "a medal is awarded");
     check(await page.evaluate(() => window.scrollY === 0 && document.documentElement.scrollTop === 0), "the game never scrolls the page");
 
     // S2 + S6: the next level flies higher and adds UFOs.
     await pressPlay(page);
+    check(await page.locator('.trophy-slot[data-filled="true"]').count() === 1 && await page.locator('.trophy-slot').first().getAttribute('data-award') === 'bronze', 'a bronze medal is awarded');
     check((await page.locator("#world").getAttribute("data-state")) === "ready", "level two waits on the pad");
     check((await goal()) === 7, `level two asks for seven stars (${await goal()})`);
     speeds.push(await speed());
@@ -179,7 +180,7 @@ async function flyLevel(page, timeoutMs) {
 
     // S11: play on through levels two and three to see the progression grow.
     const level2 = await flyLevel(page, 240000);
-    check(level2 && level2.stars === 7 && level2.overlay.emoji.includes("🎉"), `seven caught stars finish level two (${level2 && level2.stars})`);
+    check(level2 && level2.stars === 7 && level2.overlay.hasAward, `seven caught stars finish level two (${level2 && level2.stars})`);
     await pressPlay(page);
     check((await goal()) === 9, `level three asks for nine stars (${await goal()})`);
     speeds.push(await speed());
@@ -187,7 +188,7 @@ async function flyLevel(page, timeoutMs) {
     await page.waitForSelector('.hazard[data-kind="ship"]', { timeout: 30000 });
     check(true, "level three adds ships");
     const level3 = await flyLevel(page, 300000);
-    check(level3 && level3.stars === 9 && level3.overlay.emoji.includes("🎉"), `nine caught stars finish level three (${level3 && level3.stars})`);
+    check(level3 && level3.stars === 9 && level3.overlay.hasAward, `nine caught stars finish level three (${level3 && level3.stars})`);
     await pressPlay(page);
     check((await goal()) === 12, `level four asks for twelve stars (${await goal()})`);
     speeds.push(await speed());
