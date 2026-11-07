@@ -169,29 +169,49 @@ const Juegos = (() => {
     });
 
     return {
-      async award(index, { prize = sequence[index], text } = {}) {
+      async award(index, { prize = sequence[index], text, blocking = true } = {}) {
         if (!Number.isInteger(index) || !slots[index] || !Object.hasOwn(names, prize)) {
           throw new RangeError("Invalid trophy slot or prize");
         }
         const slot = slots[index];
-        const big = icon(prize);
-        big.setAttribute("role", "img");
-        big.setAttribute("aria-label", names[prize]);
-        const celebration = celebrate(big, text);
-        const from = big.getBoundingClientRect();
-        await celebration;
-        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        let reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        let from, flying;
+        if (blocking) {
+          const big = icon(prize);
+          big.setAttribute("role", "img");
+          big.setAttribute("aria-label", names[prize]);
+          const celebration = celebrate(big, text);
+          from = big.getBoundingClientRect();
+          await celebration;
+          reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        } else {
+          // Arcade games continue accepting input while the award is displayed.
+          sound.win();
+          if (!reduced) {
+            flying = icon(prize);
+            flying.classList.add("trophy-flight");
+            flying.setAttribute("role", "img");
+            flying.setAttribute("aria-label", names[prize]);
+            Object.assign(flying.style, { left: `${innerWidth / 2 - 70}px`, top: `${innerHeight / 2 - 90}px`, width: "140px", height: "180px" });
+            document.body.appendChild(flying);
+            from = flying.getBoundingClientRect();
+          }
+        }
+        if (!reduced) {
           const to = slot.getBoundingClientRect();
-          const flying = icon(prize);
-          flying.classList.add("trophy-flight");
-          Object.assign(flying.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px` });
-          document.body.appendChild(flying);
+          if (!flying) {
+            flying = icon(prize);
+            flying.classList.add("trophy-flight");
+            Object.assign(flying.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px` });
+            document.body.appendChild(flying);
+          }
           const dx = to.left + to.width / 2 - from.left - from.width / 2;
           const dy = to.top + to.height / 2 - from.top - from.height / 2;
-          const animation = flying.animate([
-            { transform: "translate(0, 0) scale(1)" },
-            { transform: `translate(${dx}px, ${dy}px) scale(${Math.min(to.width / from.width, to.height / from.height)})` },
-          ], { duration: 700, easing: "ease-in-out", fill: "forwards" });
+          const end = `translate(${dx}px, ${dy}px) scale(${Math.min(to.width / from.width, to.height / from.height)})`;
+          const frames = blocking
+            ? [{ transform: "translate(0, 0) scale(1)" }, { transform: end }]
+            : [{ transform: "translate(0, 0) scale(1)", offset: 0 }, { transform: "translate(0, 0) scale(1)", offset: 0.35 }, { transform: end, offset: 1 }];
+          const animation = flying.animate(frames, { duration: blocking ? 700 : 1100, easing: "ease-in-out", fill: "forwards" });
           await animation.finished.catch(() => {});
           flying.remove();
         }

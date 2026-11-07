@@ -6,29 +6,42 @@
     <title>Naves del teclado</title>
     <link rel="stylesheet" href="../assets/common.css" />
     <style>
-      body { background: #24334b; }
+      body { background: radial-gradient(ellipse at 50% 90%, #304866, #14213a 72%); }
       .space { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
       #sky { position: fixed; inset: 0; overflow: hidden; }
-      /* Hearts: how many ships may still land in this level. */
-      #lives { position: fixed; top: 20px; left: 112px; z-index: 40; display: flex; gap: 2px; padding: 6px 12px; border: 3px solid #24334b; border-radius: 40px; background: #fff7e4; box-shadow: 0 4px #142341; font-size: 26px; line-height: 1.2; }
-      #lives span.lost { filter: grayscale(1) opacity(0.3); transform: scale(0.8); }
-      #stats { position: fixed; left: 16px; bottom: 16px; z-index: 40; padding: 6px 14px; border: 3px solid #24334b; border-radius: 18px; background: #fff7e4; box-shadow: 0 4px #142341; color: #24334b; font-size: 22px; font-weight: bold; }
-      #stats[hidden] { display: none; }
+      #streak, #stats, #level-badge { position: fixed; z-index: 40; padding: 7px 12px; border: 2px solid #70c8d5; border-radius: 14px; background: #172943e8; color: #fff7e4; box-shadow: 0 0 14px #55cbd155; font-weight: bold; }
+      #streak { top: 112px; left: 16px; min-width: 105px; font-size: 19px; }
+      #streak strong { display: block; color: #ffcc58; font-size: 28px; }
+      #stats { top: 95px; right: 16px; font-size: 17px; line-height: 1.4; white-space: pre-line; text-align: right; }
+      #level-badge { top: 91px; left: 50%; transform: translateX(-50%); color: #ffcc58; font-size: 20px; }
+      #level-banner { position: fixed; top: 35%; left: 50%; transform: translate(-50%, -50%); z-index: 45; color: #fff7e4; text-shadow: 0 0 12px #55cbd1, 0 3px #142341; font-size: clamp(36px, 5vw, 64px); font-weight: bold; pointer-events: none; opacity: 0; }
+      #level-banner.show { opacity: 1; animation: level-banner 1.8s ease-out forwards; }
+      #shield { position: fixed; left: 20%; bottom: 10px; width: 60%; height: 19px; z-index: 20; overflow: hidden; border: 3px solid #9fe3f0; border-radius: 20px; background: #142341; box-shadow: 0 0 12px #55cbd1; }
+      #shield-fill { height: 100%; width: 100%; background: #22c55e; transition: width .25s, background .25s; }
+      #shield[data-state="warning"] #shield-fill { background: #f59e0b; }
+      #shield[data-state="danger"] #shield-fill { background: #ef4444; }
       .ship { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; will-change: transform; }
       .ship svg { width: 74px; height: 56px; animation: hover 1.2s ease-in-out infinite; }
+      .ship[data-kind="mother"] svg { width: 120px; height: 80px; filter: drop-shadow(0 0 9px #efaa63); }
+      .ship[data-kind="child"] svg { width: 52px; height: 40px; }
+      .ship[data-kind="child"] .label { font-size: 25px; }
       .ship .label { padding: 2px 12px; border: 4px solid #24334b; border-radius: 14px; background: #fff7e4; color: #24334b; font-size: 34px; font-weight: bold; line-height: 1.15; white-space: pre; }
       body[data-grade="1"] .ship .label { font-size: 48px; }
       .ship .done { color: #22a06b; text-decoration: underline 4px; }
-      .ship.locked .label { background: #ffcc58; box-shadow: 0 0 0 4px #fff7e4; }
+      .ship.locked .label { background: #ffcc58; box-shadow: 0 0 0 4px #fff7e4, 0 0 24px 9px #ffcc58; }
       .ship.wrong .label { background: #c4b5ef; }
       .ship.frozen svg { filter: drop-shadow(0 0 8px #9fe3f0); }
       .ship.frozen .label { background: #b9eff8; border-color: #4c9ec2; }
       #cannon { position: fixed; left: 50%; bottom: 0; width: 120px; height: 96px; margin-left: -60px; z-index: 30; pointer-events: none; }
       #cannon .barrel { transform-origin: 60px 70px; transition: transform 0.08s; }
-      .laser { position: fixed; height: 6px; border-radius: 3px; background: #ffcc58; box-shadow: 0 0 10px #ffcc58; transform-origin: 0 50%; z-index: 25; pointer-events: none; animation: fade 0.2s linear forwards; }
+      #cannon.impact { animation: cannon-hit .45s ease-out; filter: drop-shadow(0 0 18px #fb7d83); }
+      .impact-ship { position: fixed; pointer-events: none; z-index: 29; }
+      .laser { position: fixed; height: 6px; border-radius: 3px; background: #fff7e4; box-shadow: 0 0 8px 3px #ffcc58, 0 0 20px #fb7d83; transform-origin: 0 50%; z-index: 25; pointer-events: none; animation: fade 0.2s linear forwards; }
       .overlay .overlay-text { white-space: pre-line; text-align: center; }
       .grade-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; max-width: 760px; }
       .grade-row .play-btn { width: 96px; height: 96px; font-size: 36px; font-weight: bold; }
+      @keyframes level-banner { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+      @keyframes cannon-hit { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-12px); } 40% { transform: translateX(10px); } 60% { transform: translateX(-6px); } 80% { transform: translateX(4px); } }
       @keyframes hover { 50% { transform: translateY(-5px); } }
       @keyframes fade { to { opacity: 0; } }
       @media (max-height: 650px) { .ship .label { font-size: 28px; } body[data-grade="1"] .ship .label { font-size: 40px; } .ship svg { width: 60px; height: 45px; } #cannon { width: 96px; height: 77px; margin-left: -48px; } .grade-row .play-btn { width: 80px; height: 80px; font-size: 30px; } }
@@ -52,8 +65,11 @@
       </g>
     </svg>
     <main id="sky" aria-label="Naves del teclado"></main>
-    <div id="lives" aria-label="Corazones"></div>
-    <div id="stats" role="status" aria-live="polite" hidden></div>
+    <div id="streak" aria-label="Racha"></div>
+    <div id="stats" role="status" aria-live="polite"></div>
+    <div id="level-badge"></div>
+    <div id="level-banner" aria-live="polite"></div>
+    <div id="shield" role="progressbar" aria-label="Escudo" aria-valuemin="0" aria-valuemax="3" aria-valuenow="3"><div id="shield-fill"></div></div>
     <svg id="cannon" viewBox="0 0 120 96" aria-hidden="true">
       <g stroke="#142341" stroke-width="5" stroke-linejoin="round">
         <g class="barrel"><rect x="50" y="8" width="20" height="62" rx="6" fill="#fb7d83"/></g>
@@ -104,12 +120,17 @@
         meteor: { text: null, name: "Meteorito", art: '<path d="M14 5q16 4 25 10L64 6 55 26q7 12-1 22-10 12-26 3-15-8-14-23z" fill="#ffb052"/><circle cx="37" cy="33" r="15" fill="#ad9df0"/><circle cx="32" cy="28" r="3" fill="#fff7e4" stroke="none"/><circle cx="43" cy="38" r="3" fill="#52699a" stroke="none"/>' },
       };
       const SHIP_ART = '<path d="M37 4c-10 0-16 10-16 20h32c0-10-6-20-16-20z" fill="#9fe3f0"/><path d="M4 30q33-14 66 0l-8 14H12z" fill="#ad9df0"/><circle cx="22" cy="36" r="3" fill="#ffcc58"/><circle cx="37" cy="38" r="3" fill="#ffcc58"/><circle cx="52" cy="36" r="3" fill="#ffcc58"/><path d="M22 44l-4 9m34-9 4 9" fill="none"/>';
+      const MOTHER_ART = '<path d="M20 25q3-19 17-20 14 1 17 20z" fill="#ffcc58"/><path d="M2 29q35-14 70 0L62 45H12z" fill="#efaa63"/><path d="M10 34h54M18 44l-6 8m44-8 6 8" fill="none"/><circle cx="24" cy="36" r="3" fill="#fff7e4"/><circle cx="37" cy="37" r="3" fill="#fff7e4"/><circle cx="50" cy="36" r="3" fill="#fff7e4"/>';
 
       const sky = document.getElementById("sky");
-      const livesBox = document.getElementById("lives");
+      const shield = document.getElementById("shield");
       const statsBox = document.getElementById("stats");
+      const streakBox = document.getElementById("streak");
+      const levelBadge = document.getElementById("level-badge");
+      const levelBanner = document.getElementById("level-banner");
+      const cannon = document.getElementById("cannon");
       const barrel = document.querySelector("#cannon .barrel");
-      const medals = Juegos.medals();
+      const trophies = Juegos.trophies(4);
       Juegos.homeButton();
       Juegos.guardRightClick();
 
@@ -125,6 +146,8 @@
       let untilSpawn = 0;
       let interval = 0;
       let shipsSinceSpecial = 0;
+      let shipsSinceMother = 0;
+      let motherDebt = 0;
       let freezeRemaining = 0;
       let lastText = "";
       let stats = null;
@@ -132,28 +155,55 @@
 
       // 1º-2º accept capitals for lowercase text; 3º and up must match exactly.
       const same = (a, b) => (grade >= 3 ? a === b : a.toLowerCase() === b.toLowerCase());
+      const isThreat = (ship) => ship.kind === "ship" || ship.kind === "mother" || ship.kind === "child";
+      const multiplier = () => stats.streak >= 20 ? 2 : stats.streak >= 10 ? 1.5 : 1;
+      const currentSpeed = () => stats.correct / Math.max(1 / 60, (performance.now() - stats.start) / 60000);
+      // Before the first key there is nothing to measure: "—" instead of a discouraging "0 %".
+      const accuracyText = () => (stats.keys ? `${Math.round(100 * stats.correct / stats.keys)} %` : "—");
+      // A few quick keys in the first seconds give absurd speeds, so the record waits.
+      const PEAK_AFTER_MS = 10000;
 
       function publish() {
         document.body.dataset.grade = grade;
         document.body.dataset.level = level;
         document.body.dataset.hearts = hearts;
-        livesBox.replaceChildren(...Array.from({ length: HEARTS }, (_, i) => {
-          const s = document.createElement("span");
-          s.textContent = "❤️";
-          if (i >= hearts) s.className = "lost";
-          return s;
-        }));
-        livesBox.setAttribute("aria-label", `${hearts} corazones`);
-        statsBox.hidden = grade < 2;
-        statsBox.textContent = `Puntos: ${stats ? stats.score : 0}`;
+        shield.setAttribute("aria-valuenow", String(hearts));
+        shield.dataset.state = hearts === 3 ? "full" : hearts === 2 ? "warning" : "danger";
+        shield.firstElementChild.style.width = `${100 * hearts / HEARTS}%`;
+        levelBadge.textContent = `Nivel ${level + 1}`;
+        streakBox.replaceChildren(`Racha: ${stats.streak}`, document.createElement("strong"));
+        streakBox.lastElementChild.textContent = `×${multiplier()}`;
+        const lines = [`Puntos: ${stats.score}`];
+        if (grade >= 3) {
+          lines.push(`Precisión: ${accuracyText()}`);
+          if (grade <= 4) lines.push(`Pulsaciones/min: ${Math.round(currentSpeed())}`);
+          else {
+            const wpm = Math.round(currentSpeed() / 5);
+            const settled = performance.now() - stats.start >= PEAK_AFTER_MS;
+            if (settled) stats.peak = Math.max(stats.peak, wpm);
+            lines.push(`Palabras/min: ${wpm}`, `Máximo: ${settled || stats.peak ? stats.peak : "—"}`);
+          }
+        }
+        statsBox.textContent = lines.join("\n");
+        stats.lastPublished = performance.now();
       }
 
       function spawnOne() {
         // Every object has a unique initial, so the first key selects it unambiguously.
         const taken = alive.map((s) => s.text[0].toLowerCase());
+        const availableText = (pool) => pool.filter((t) => !taken.includes(t[0].toLowerCase()));
         const letters = words("a e i o u m p l s t").filter((letter) => !taken.includes(letter));
+        const mother = alive.find((s) => s.kind === "mother");
         let kind = "ship", text = "";
-        if (shipsSinceSpecial >= 3 && !alive.some((s) => s.kind !== "ship")) {
+        if (mother) {
+          kind = "child";
+          // The sentence level launches short words, not another sentence.
+          const source = grade >= 5 && level === 3 ? config.levels[0] : config.levels[level];
+          const pool = availableText(source);
+          if (!pool.length) return null;
+          const shortest = Math.min(...pool.map((t) => t.length));
+          text = Juegos.pick(pool.filter((t) => t.length === shortest));
+        } else if (shipsSinceSpecial >= 3 && !alive.some((s) => Object.hasOwn(SPECIALS, s.kind))) {
           const available = Object.keys(SPECIALS).filter((key) => {
             const word = SPECIALS[key].text;
             return grade === 1 || !word ? letters.length > 0 : !taken.includes(word[0]);
@@ -164,40 +214,66 @@
             shipsSinceSpecial = 0;
           }
         }
+        if (kind === "ship" && grade >= 2 && shipsSinceMother >= 2) {
+          // 2º starts with syllables; its next pool supplies an age-appropriate
+          // longer word. Sentence levels use the grade's word pool instead.
+          const source = grade === 2 && level === 0 ? config.levels[1]
+            : grade >= 5 && level === 3 ? config.levels[2] : config.levels[level];
+          const pool = availableText(source.filter((t) => !t.includes(" ")));
+          if (pool.length) {
+            const longest = Math.max(...pool.map((t) => t.length));
+            kind = "mother";
+            text = Juegos.pick(pool.filter((t) => t.length === longest));
+            shipsSinceMother = 0;
+          }
+        }
         if (kind === "ship") {
-          const pool = config.levels[level].filter((t) => !taken.includes(t[0].toLowerCase()) && t !== lastText);
-          if (!pool.length) return;
+          const pool = availableText(config.levels[level]).filter((t) => t !== lastText);
+          if (!pool.length) return null;
           text = Juegos.pick(pool);
           lastText = text;
-          shipsSinceSpecial++;
         }
+        if (kind === "ship" || kind === "child") shipsSinceMother++;
+        if (kind === "ship" || kind === "child" || kind === "mother") shipsSinceSpecial++;
         const el = document.createElement("div");
         el.className = "ship";
         el.dataset.kind = kind;
         el.dataset.text = text;
         el.dataset.typed = "0";
-        const art = kind === "ship" ? SHIP_ART : SPECIALS[kind].art;
+        const art = kind === "mother" ? MOTHER_ART : kind === "ship" || kind === "child" ? SHIP_ART : SPECIALS[kind].art;
         el.innerHTML = `<svg viewBox="0 0 74 56" aria-hidden="true"><g stroke="#142341" stroke-width="4" stroke-linejoin="round">${art}</g></svg>`;
         const label = document.createElement("div");
         label.className = "label";
         el.appendChild(label);
         sky.appendChild(el);
-        const ship = { el, label, text, kind, typed: 0, x: 0, y: 90, dx: 0 };
-        if (kind === "ship" && freezeRemaining > 0) el.classList.add("frozen");
+        const ship = { el, label, text, kind, typed: 0, x: 0, y: kind === "child" ? mother.y : 90, dx: 0 };
+        if (isThreat(ship) && freezeRemaining > 0) el.classList.add("frozen");
         drawLabel(ship);
         // Pick a spot away from the other ships, inside the screen.
         const width = el.offsetWidth;
         const room = Math.max(1, innerWidth - width - 40);
+        const panels = [".home-btn", ".progress", ".trophies", "#streak", "#stats", "#level-badge"]
+          .map((selector) => document.querySelector(selector)?.getBoundingClientRect()).filter(Boolean);
+        const hitsPanel = (x) => panels.some((r) => x < r.right && x + width > r.left && ship.y < r.bottom && ship.y + el.offsetHeight > r.top);
         let best = 20, gap = -1;
-        for (let i = 0; i < 8; i++) {
-          const x = 20 + Math.random() * room;
+        // Fixed fallback candidates still find a free area with deterministic RNG.
+        const candidates = [...Array.from({ length: 8 }, () => 20 + Math.random() * room),
+          ...Array.from({ length: 21 }, (_, i) => 20 + room * i / 20)];
+        for (const x of candidates) {
+          if (hitsPanel(x)) continue;
           const nearest = Math.min(Infinity, ...alive.map((s) => Math.abs(s.x - x)));
           if (nearest > gap) { gap = nearest; best = x; }
+        }
+        if (mother) {
+          const right = mother.x + mother.el.offsetWidth + 12;
+          const adjacent = right + width <= innerWidth - 20 ? right : mother.x - width - 12;
+          if (adjacent >= 20 && adjacent + width <= innerWidth - 20 && !hitsPanel(adjacent)) best = adjacent;
         }
         ship.x = best;
         ship.dx = best < innerWidth / 2 ? 50 : -50;
         alive.push(ship);
         place(ship);
+        return ship;
       }
 
       function drawLabel(ship) {
@@ -206,7 +282,8 @@
         done.textContent = ship.text.slice(0, ship.typed);
         ship.label.replaceChildren(done, ship.text.slice(ship.typed));
         ship.el.dataset.typed = ship.typed;
-        ship.el.setAttribute("aria-label", ship.kind === "ship" ? ship.text : `${SPECIALS[ship.kind].name}: ${ship.text}`);
+        const name = ship.kind === "mother" ? "Nave nodriza" : ship.kind === "child" ? "Nave pequeña" : SPECIALS[ship.kind]?.name;
+        ship.el.setAttribute("aria-label", name ? `${name}: ${ship.text}` : ship.text);
       }
 
       function place(ship) {
@@ -259,9 +336,12 @@
             // Recalculate from the actual ground and object height on every frame.
             const speed = grade === 1 ? config.speed * (1 + 0.12 * level)
               : Math.max(1, ground - 90 - ship.el.offsetHeight) / (2 * interval);
-            const moving = ship.kind === "ship" ? Math.max(0, dt - frozenAtStart) : dt;
-            ship.el.classList.toggle("frozen", ship.kind === "ship" && freezeRemaining > 0);
-            ship.y += speed * (ship.kind === "meteor" ? 3 : 1) * moving;
+            const moving = isThreat(ship) ? Math.max(0, dt - frozenAtStart) : dt;
+            ship.el.classList.toggle("frozen", isThreat(ship) && freezeRemaining > 0);
+            // Children descend faster than their mother, but leave enough
+            // time for a player typing her longer word at the target WPM.
+            const speedFactor = ship.kind === "meteor" ? 3 : ship.kind === "mother" ? 0.65 : ship.kind === "child" ? 0.75 : 1;
+            ship.y += speed * speedFactor * moving;
             if (ship.kind === "meteor") ship.x += ship.dx * dt;
             place(ship);
             if (ship.y + ship.el.offsetHeight >= ground) land(ship);
@@ -270,42 +350,85 @@
           untilSpawn -= dt;
           // An empty sky gets an object at once, even between scheduled spawns.
           const max = grade === 1 ? config.max : 2;
-          const normalCount = alive.filter((s) => s.kind === "ship").length;
+          const normalCount = alive.filter(isThreat).length;
           if (playing && (alive.length === 0 || untilSpawn <= 0)) {
-            if (alive.length < max && destroyed + normalCount < GOALS[level]) spawnOne();
-            untilSpawn = interval;
+            const spawned = alive.length < max && destroyed + normalCount < GOALS[level] ? spawnOne() : null;
+            if (grade >= 2 && spawned?.kind === "mother") {
+              // Split the mother's typing budget around its first launch. The
+              // second half is charged along with the child's own characters.
+              motherDebt = spawned.text.length * 12 / config.wpm[level] / 2;
+              untilSpawn = motherDebt;
+            } else if (grade >= 2 && spawned?.kind === "child") {
+              untilSpawn = motherDebt + spawned.text.length * 12 / config.wpm[level];
+              motherDebt = 0;
+            } else {
+              if (spawned && !alive.some((s) => s.kind === "mother")) motherDebt = 0;
+              untilSpawn = interval;
+            }
           }
+          if (now - stats.lastPublished >= 1000) publish();
         }
         requestAnimationFrame(tick);
+      }
+
+      let impactTimer, bannerTimer;
+      function hitCannon(ship) {
+        const picture = ship.el.querySelector("svg");
+        const from = picture.getBoundingClientRect(), to = cannon.getBoundingClientRect();
+        if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          const flying = picture.cloneNode(true);
+          flying.classList.add("impact-ship");
+          Object.assign(flying.style, { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px` });
+          document.body.appendChild(flying);
+          const dx = to.left + to.width / 2 - from.left - from.width / 2;
+          const dy = to.top + to.height / 2 - from.top - from.height / 2;
+          flying.animate([{ transform: "translate(0, 0) scale(1)" }, { transform: `translate(${dx}px, ${dy}px) scale(.3)` }], { duration: 300, easing: "ease-in" }).finished.catch(() => {}).then(() => flying.remove());
+        }
+        cannon.classList.remove("impact");
+        void cannon.offsetWidth;
+        cannon.classList.add("impact");
+        clearTimeout(impactTimer);
+        impactTimer = setTimeout(() => cannon.classList.remove("impact"), 450);
       }
 
       function land(ship) {
         const box = ship.el.getBoundingClientRect();
         Juegos.burst(box.left + box.width / 2, box.bottom, "💥", 6);
+        if (isThreat(ship)) hitCannon(ship);
         removeShip(ship);
         // Specials are opportunities, never a penalty if the player misses them.
-        if (ship.kind !== "ship") return;
+        if (!isThreat(ship)) return;
         Juegos.sound.oops();
         hearts--;
         publish();
         if (hearts === 0) loseLevel();
       }
 
-      function startLevel() {
+      function startLevel(resetRun = false) {
         for (const ship of [...alive]) removeShip(ship);
         destroyed = 0;
-        hearts = HEARTS;
+        if (resetRun || !stats) {
+          hearts = HEARTS;
+          stats = { keys: 0, correct: 0, streak: 0, best: 0, score: 0, destroyed: 0, peak: 0, start: performance.now(), lastPublished: performance.now() };
+        }
         locked = null;
         untilSpawn = 0;
         shipsSinceSpecial = 0;
+        shipsSinceMother = 0;
+        motherDebt = 0;
         freezeRemaining = 0;
         const pool = config.levels[level];
         const averageChars = pool.reduce((total, text) => total + text.length, 0) / pool.length;
         interval = grade === 1 ? config.every : averageChars * 12 / config.wpm[level];
-        stats = { keys: 0, correct: 0, streak: 0, best: 0, score: 0, start: performance.now() };
         // The shared star bar has a fixed size, so each level gets a fresh one.
         document.querySelector(".progress")?.remove();
         progress = Juegos.progress(GOALS[level]);
+        levelBanner.textContent = `Nivel ${level + 1}`;
+        levelBanner.classList.remove("show");
+        void levelBanner.offsetWidth;
+        levelBanner.classList.add("show");
+        clearTimeout(bannerTimer);
+        bannerTimer = setTimeout(() => levelBanner.classList.remove("show"), 1800);
         publish();
         playing = true;
       }
@@ -313,15 +436,15 @@
       async function loseLevel() {
         playing = false;
         for (const ship of [...alive]) removeShip(ship);
-        await Juegos.overlay("💔", "¡Inténtalo otra vez!");
-        startLevel();
+        await Juegos.overlay("💔", `¡Inténtalo otra vez!\n${summary()}`);
+        startLevel(true);
       }
 
       function summary() {
         const minutes = Math.max(1 / 60, (performance.now() - stats.start) / 60000);
-        const lines = [`🚀 ${destroyed} naves`];
+        const lines = [`🚀 ${stats.destroyed} naves`];
         if (grade >= 2) lines.push(`Puntos: ${stats.score}`);
-        if (grade >= 3) lines.push(`Precisión: ${Math.round((stats.correct / Math.max(1, stats.keys)) * 100)} %`);
+        if (grade >= 3) lines.push(`Precisión: ${accuracyText()}`);
         if (grade === 3 || grade === 4) lines.push(`Pulsaciones por minuto: ${Math.round(stats.correct / minutes)}`);
         if (grade >= 5) {
           // Standard typing speed: one word is five keystrokes.
@@ -341,34 +464,40 @@
       }
 
       async function finishLevel() {
-        playing = false;
-        for (const ship of [...alive]) removeShip(ship);
         const last = level === config.levels.length - 1;
-        medals.add(last ? "🏆" : "🏅");
-        await Juegos.celebrate(last ? "🏆" : "🎉", summary());
-        level = Math.min(level + 1, config.levels.length - 1);
-        startLevel();
+        trophies.award(level, { blocking: false });
+        if (last) {
+          playing = false;
+          for (const ship of [...alive]) removeShip(ship);
+          await Juegos.overlay("🏆", summary());
+          startLevel(true); // The fourth level repeats after the summary.
+        } else {
+          level++;
+          startLevel();
+        }
       }
 
       function completeTarget(ship) {
         const box = ship.el.getBoundingClientRect();
-        Juegos.burst(box.left + box.width / 2, box.top + box.height / 2, "⭐");
+        Juegos.burst(box.left + box.width / 2, box.top + box.height / 2, "⭐", ship.kind === "mother" ? 20 : 8);
         Juegos.sound.pop();
         removeShip(ship);
-        stats.score += ship.text.length * 10;
-        if (ship.kind === "ship") {
+        stats.score += ship.text.length * 10 * multiplier() * (ship.kind === "mother" ? 2 : 1);
+        if (isThreat(ship)) {
           destroyed++;
+          stats.destroyed++;
         } else if (ship.kind === "heart") {
           if (hearts < HEARTS) hearts++;
           else stats.score += 50;
         } else if (ship.kind === "ice") {
           freezeRemaining = 5;
-          alive.filter((s) => s.kind === "ship").forEach((s) => s.el.classList.add("frozen"));
+          alive.filter(isThreat).forEach((s) => s.el.classList.add("frozen"));
         } else if (ship.kind === "bomb") {
-          for (const target of [...alive].filter((s) => s.kind === "ship")) {
+          for (const target of [...alive].filter(isThreat)) {
             removeShip(target);
             destroyed++;
-            stats.score += target.text.length * 10;
+            stats.destroyed++;
+            stats.score += target.text.length * 10 * multiplier() * (target.kind === "mother" ? 2 : 1);
           }
         } else if (ship.kind === "meteor") {
           stats.score += 50;
@@ -381,6 +510,7 @@
       function wrong(ship) {
         Juegos.sound.oops();
         stats.streak = 0;
+        publish();
         const target = ship || alive[0];
         target.el.classList.add("wrong");
         clearTimeout(target.flash);
@@ -408,6 +538,7 @@
         alive.forEach((s) => s.el.classList.toggle("locked", s === ship));
         ship.typed++;
         drawLabel(ship);
+        publish();
         shoot(ship);
         if (ship.typed < ship.text.length) return Juegos.sound.click();
         completeTarget(ship);
