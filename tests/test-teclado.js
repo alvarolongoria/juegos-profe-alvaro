@@ -139,7 +139,10 @@ const pools = {
     ["El sol brilla", "Me gusta leer", "Hoy hace frío", "Mi perro corre", "La luna sale", "Vamos al parque", "Tengo un libro", "Juego con mis amigos", "Las flores huelen bien", "Comemos fruta", "Bebo agua fresca", "Nado en la piscina"],
   ],
 };
-const demand = { 2: [4, 5, 6, 8], 3: [6, 8, 10, 12], 4: [8, 10, 13, 16], 5: [10, 13, 16, 20], 6: [12, 16, 20, 24] };
+const demand = { 2: [4, 6, 8, 10], 3: [6, 8, 11, 14], 4: [8, 11, 14, 18], 5: [10, 14, 18, 24], 6: [12, 17, 23, 30] };
+// How much longer a ship takes to land than typing it needs at the target:
+// it shrinks level by level and stays generous for the youngest grades.
+const slack = { 2: [2, 1.9, 1.75, 1.6], 3: [2, 1.8, 1.6, 1.45], 4: [2, 1.75, 1.55, 1.4], 5: [2, 1.7, 1.45, 1.35], 6: [2, 1.7, 1.45, 1.3] };
 
 async function measureLevel(page) {
   return page.evaluate(() => {
@@ -232,10 +235,10 @@ async function calibrationAndSpecials() {
     for (let level = 0; level < 4; level++) {
       const pool = pools[grade === 4 ? 3 : grade === 6 ? 5 : grade][level];
       const expected = pool.reduce((n, word) => n + word.length, 0) / pool.length * 12 / demand[grade][level];
-      console.log(`calibration ${grade}º level ${level + 1}: interval ${expected.toFixed(2)}s, fall ${(expected * 2).toFixed(2)}s`);
+      console.log(`calibration ${grade}º level ${level + 1}: interval ${expected.toFixed(2)}s, fall ${(expected * slack[grade][level]).toFixed(2)}s`);
       const measured = await measureLevel(page);
-      check(!!measured && Math.abs(measured.interval - expected) < 0.16, `S9 ${grade}º level ${level + 1}: spawn interval matches ${demand[grade][level]} WPM`);
-      check(!!measured && Math.abs(measured.fall - 2 * expected) < 0.25, `S9 ${grade}º level ${level + 1}: fall lasts twice the interval`);
+      check(!!measured && Math.abs(measured.interval - expected) < 0.16, `S15 ${grade}º level ${level + 1}: spawn interval matches ${demand[grade][level]} WPM`);
+      check(!!measured && Math.abs(measured.fall - slack[grade][level] * expected) < 0.25, `S16 ${grade}º level ${level + 1}: fall lasts ${slack[grade][level]}x the interval`);
       check(!!measured && measured.initialCount === 1, `S9 ${grade}º level ${level + 1}: no double wave`);
       const result = await finishWithClock(page);
       check(result.finished, `S9 ${grade}º level ${level + 1}: finishes through keyboard`);
@@ -251,7 +254,7 @@ async function calibrationAndSpecials() {
   await chooseGrade(page, 5);
   const small = await measureLevel(page);
   const expectedSmall = pools[5][0].reduce((n, t) => n + t.length, 0) / pools[5][0].length * 12 / 10;
-  check(!!small && Math.abs(small.fall - 2 * expectedSmall) < 0.25, "S9 fall time holds at 1024x600");
+  check(!!small && Math.abs(small.fall - slack[5][0] * expectedSmall) < 0.25, "S16 fall time holds at 1024x600");
 
   await page.setViewportSize({ width: 1516, height: 694 });
   const found = {};
