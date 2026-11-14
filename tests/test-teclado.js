@@ -72,6 +72,34 @@ async function nextShip(page) {
   }
 }
 
+// A Chromebook composes ´ + vowel in its input method: the vowel's keydown
+// carries no character and "á" only reaches a focused text field.
+async function typeChromebook(page, cdp, text) {
+  for (const ch of text) {
+    if (!/[áéíóú]/i.test(ch)) { await typeChar(page, ch); continue; }
+    await typeChar(page, "Dead");
+    await cdp.send("Input.imeSetComposition", { text: "´", selectionStart: 1, selectionEnd: 1 });
+    await typeChar(page, "Process");
+    await cdp.send("Input.insertText", { text: ch });
+  }
+}
+
+async function chromebookAccents() {
+  const game = await openGame("juegos/teclado.html");
+  const { page } = game;
+  const cdp = await page.context().newCDPSession(page);
+  await chooseGrade(page, 2);
+  await playLevel(page, 5, null, "Chromebook 2º level 1");
+  await playLevel(page, 7, null, "Chromebook 2º level 2");
+  let word = await nextShip(page);
+  while (!/[áéíóú]/.test(word)) { await typeText(page, word); word = await nextShip(page); }
+  const before = await score(page);
+  await typeChromebook(page, cdp, word);
+  check(await score(page) === before + 1, `Chromebook accents shoot "${word}" once (´ composed by the input method)`);
+  check(await page.locator(`.ship[data-text="${word}"]`).count() === 0, `Chromebook accented ship "${word}" is destroyed`);
+  await finish(game);
+}
+
 async function chooseGrade(page, grade) {
   await page.waitForSelector(".overlay .grade-btn");
   await page.click(`.overlay .grade-btn[data-grade="${grade}"]`, { force: true });
@@ -771,5 +799,6 @@ async function arcadeContracts() {
   await virtualTypists();
   await realTypist();
   await liveStatsStart();
+  await chromebookAccents();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 })().catch((error) => { console.error(error); console.error(`TOTAL before error: ${okCount} ok, ${failCount} FAIL`); process.exit(1); });

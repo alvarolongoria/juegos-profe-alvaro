@@ -10,6 +10,7 @@
       .space { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
       #sky { position: fixed; inset: 0; overflow: hidden; }
       #streak, #stats, #level-badge { position: fixed; z-index: 40; padding: 7px 12px; border: 2px solid #70c8d5; border-radius: 14px; background: #172943e8; color: #fff7e4; box-shadow: 0 0 14px #55cbd155; font-weight: bold; }
+      .key-catcher { position: fixed; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
       #streak { top: 112px; left: 16px; min-width: 105px; font-size: 19px; }
       #streak strong { display: block; color: #ffcc58; font-size: 28px; }
       #stats { top: 95px; right: 16px; font-size: 17px; line-height: 1.4; white-space: pre-line; text-align: right; }
@@ -442,6 +443,7 @@
         bannerTimer = setTimeout(() => levelBanner.classList.remove("show"), 1800);
         publish();
         playing = true;
+        holdFocus();
       }
 
       async function loseLevel() {
@@ -529,13 +531,39 @@
       }
 
       window.addEventListener("keydown", (event) => {
-        if (!playing || event.repeat || event.ctrlKey || event.metaKey) return;
+        if (!playing || event.ctrlKey || event.metaKey) return;
         // Only keys that write one character count: not Shift, Enter, or the
         // dead ´ key, which waits for its vowel and then arrives as "á".
         if (event.key.length !== 1) return;
+        // Handled here, so the hidden field below never receives it too.
         event.preventDefault();
+        if (!event.repeat) typeKey(event.key);
+      });
+
+      // A Chromebook composes ´ + vowel in its input method and delivers "á"
+      // only to a focused text field, never as a keydown. This invisible field
+      // keeps the focus during play and passes that composed text to the game.
+      const catcher = document.createElement("input");
+      catcher.className = "key-catcher";
+      catcher.setAttribute("aria-hidden", "true");
+      catcher.tabIndex = -1;
+      for (const [name, value] of [["autocomplete", "off"], ["autocapitalize", "off"], ["autocorrect", "off"], ["spellcheck", "false"]]) catcher.setAttribute(name, value);
+      document.body.appendChild(catcher);
+      // Read the field, not the event: whichever event fires first takes the text.
+      const takeComposed = () => {
+        const text = catcher.value;
+        catcher.value = "";
+        if (playing) for (const ch of text) typeKey(ch);
+      };
+      catcher.addEventListener("compositionend", takeComposed);
+      catcher.addEventListener("input", (event) => { if (!event.isComposing) takeComposed(); });
+      const holdFocus = () => { if (playing && document.activeElement !== catcher) catcher.focus({ preventScroll: true }); };
+      catcher.addEventListener("blur", () => setTimeout(holdFocus));
+      document.addEventListener("pointerup", holdFocus);
+      setInterval(holdFocus, 500);
+
+      function typeKey(key) {
         if (!alive.length) return;
-        const key = event.key;
         stats.keys++;
         // The first key picks the lowest ship that starts with it.
         const ship = locked || alive
@@ -553,7 +581,7 @@
         shoot(ship);
         if (ship.typed < ship.text.length) return Juegos.sound.click();
         completeTarget(ship);
-      });
+      }
 
       // Start screen: one green button per grade (keys 1-6 work too).
       function chooseGrade() {
