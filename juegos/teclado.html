@@ -54,6 +54,23 @@
       /* A laser fired by a ship, not by the player: red, never confused with ours. */
       .laser.enemy { height: 8px; background: #fb7d83; box-shadow: 0 0 10px 4px #fb7d83, 0 0 24px #e0404a; }
       .overlay .overlay-text { white-space: pre-line; text-align: center; }
+      /* Keep the win summary, ranking and replay button usable on short screens. */
+      .overlay.ranking-overlay { justify-content: safe center; gap: 8px; padding: 12px; overflow-y: auto; }
+      .ranking-overlay .big-emoji { font-size: 60px; }
+      .ranking-overlay .overlay-text { font-size: clamp(16px, 2.2vw, 24px); line-height: 1.2; }
+      .ranking-overlay .play-btn { flex-shrink: 0; width: 68px; height: 68px; border-width: 3px; padding-left: 6px; font-size: 36px; }
+      #ranking { width: min(100%, 500px); padding: 10px 14px; border: 2px solid #24334b; border-radius: 16px; background: #fff7e4; color: #24334b; text-align: center; }
+      #ranking h2 { margin: 0 0 4px; font-size: 19px; }
+      #ranking p { margin: 4px 0; }
+      #ranking form, #ranking .ranking-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: end; gap: 8px; }
+      #ranking label { display: flex; flex-direction: column; gap: 2px; font-weight: bold; text-align: left; }
+      #ranking select, #ranking button { min-height: 38px; padding: 4px 10px; border: 2px solid #24334b; border-radius: 9px; background: white; color: #24334b; font: inherit; }
+      #ranking button { background: #b9eff8; font-weight: bold; }
+      #ranking button:disabled { opacity: .55; }
+      #ranking ol { width: fit-content; max-width: 100%; max-height: 120px; overflow: auto; margin: 6px auto 0; padding-left: 32px; text-align: left; }
+      #ranking ol:empty { display: none; }
+      #ranking li { padding: 2px 5px; overflow-wrap: anywhere; }
+      #ranking .ranking-saved { border-radius: 6px; background: #ffda55; color: #142341; font-weight: bold; }
       .grade-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; max-width: 760px; }
       .grade-row .play-btn { width: 96px; height: 96px; font-size: 36px; font-weight: bold; }
       @keyframes level-banner { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
@@ -93,6 +110,7 @@
       </g>
     </svg>
     <script src="../assets/common.js"></script>
+    <script src="../assets/ranking-config.js"></script>
     <script>
       // Each grade has four levels, easiest first. 1º-2º ignore capitals;
       // from 3º the text must be typed exactly, capitals and accents included.
@@ -718,13 +736,129 @@
         return lines.join("\n");
       }
 
+      // The server accepts only these invented names (ranking/Code.gs).
+      // Keep both lists identical to its ANIMALS and ADJECTIVES.
+      const RANKING_ANIMALS = ["Tigre", "León", "Delfín", "Águila", "Lince", "Búho", "Zorro", "Koala",
+        "Panda", "Halcón", "Lobo", "Pingüino", "Tortuga", "Jaguar", "Colibrí", "Ballena"];
+      const RANKING_ADJECTIVES = ["Veloz", "Valiente", "Feliz", "Audaz", "Genial", "Brillante", "Gigante",
+        "Ágil", "Fuerte", "Alegre", "Leal", "Tenaz", "Imparable", "Increíble", "Elegante", "Sonriente"];
+
+      function showRanking(layer, resultGrade, resultScore, rankingUrl) {
+        layer.classList.add("ranking-overlay");
+        const section = document.createElement("section");
+        section.id = "ranking";
+        section.setAttribute("aria-label", "Ranking del mes");
+        const title = document.createElement("h2");
+        title.textContent = "¡Entra en el ranking del mes!";
+        const details = document.createElement("p");
+        details.textContent = `Curso: ${resultGrade}º · Puntos: ${resultScore}`;
+        const form = document.createElement("form");
+        function select(labelText, name, options) {
+          const label = document.createElement("label");
+          label.textContent = labelText;
+          const field = document.createElement("select");
+          field.name = name;
+          for (const word of options) {
+            const option = document.createElement("option");
+            option.value = word;
+            option.textContent = word;
+            field.appendChild(option);
+          }
+          label.appendChild(field);
+          form.appendChild(label);
+          return field;
+        }
+        const animal = select("Animal", "animal", RANKING_ANIMALS);
+        const adjective = select("Adjetivo", "adjective", RANKING_ADJECTIVES);
+        const actions = document.createElement("div");
+        actions.className = "ranking-actions";
+        const save = document.createElement("button");
+        save.type = "submit";
+        save.textContent = "Guardar";
+        const view = document.createElement("button");
+        view.type = "button";
+        view.textContent = "Ver ranking";
+        actions.append(save, view);
+        form.appendChild(actions);
+        const message = document.createElement("p");
+        message.setAttribute("role", "status");
+        message.setAttribute("aria-live", "polite");
+        const list = document.createElement("ol");
+        section.append(title, details, form, message, list);
+        layer.insertBefore(section, layer.querySelector(".play-btn"));
+
+        let submitted = false, saving = false, requestVersion = 0, saved = null;
+        async function request(params) {
+          const url = new URL(rankingUrl, window.location.href);
+          for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+          const response = await fetch(url.toString());
+          if (!response.ok) throw new Error("Ranking request failed");
+          const result = await response.json();
+          if (!result || result.ok !== true || !Array.isArray(result.top)) throw new Error("Ranking response failed");
+          return result.top;
+        }
+        function render(top) {
+          message.textContent = top.length ? "" : "Todavía no hay nadie este mes";
+          list.replaceChildren();
+          let highlighted = false;
+          for (const entry of top) {
+            const item = document.createElement("li");
+            // Names come from the server: treat them as text, never markup.
+            item.textContent = `${entry.name} — ${entry.points}`;
+            if (!highlighted && saved && entry.name === saved.name && entry.points === saved.points) {
+              item.classList.add("ranking-saved");
+              item.setAttribute("aria-label", `Tu puntuación: ${item.textContent}`);
+              highlighted = true;
+            }
+            list.appendChild(item);
+          }
+        }
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          // Even a failed response may have followed a successful server write.
+          if (submitted) return;
+          submitted = true;
+          saving = true;
+          save.disabled = true;
+          view.disabled = true;
+          const version = ++requestVersion;
+          const name = `${animal.value} ${adjective.value}`;
+          message.textContent = "Guardando…";
+          try {
+            const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore });
+            saved = { name, points: resultScore };
+            if (version === requestVersion) render(top);
+          } catch {
+            if (version === requestVersion) message.textContent = "No se pudo guardar ahora. Inténtalo más tarde.";
+          } finally {
+            saving = false;
+            view.disabled = false;
+          }
+        });
+        view.addEventListener("click", async () => {
+          const version = ++requestVersion;
+          view.disabled = true;
+          message.textContent = "Cargando ranking…";
+          try {
+            const top = await request({ action: "top", grade: resultGrade });
+            if (version === requestVersion) render(top);
+          } catch {
+            if (version === requestVersion) message.textContent = "No se pudo cargar el ranking ahora. Inténtalo más tarde.";
+          } finally {
+            if (!saving) view.disabled = false;
+          }
+        });
+      }
+
       async function finishLevel() {
         const last = level === config.levels.length - 1;
         trophies.award(level, { blocking: false });
         if (last) {
           playing = false;
           for (const ship of [...alive]) removeShip(ship);
-          await Juegos.overlay("🏆", summary());
+          const overlay = Juegos.overlay("🏆", summary());
+          if (window.RANKING_URL) showRanking(document.querySelector(".overlay"), grade, stats.score, window.RANKING_URL);
+          await overlay;
           startLevel(true); // The fourth level repeats after the summary.
         } else {
           level++;
