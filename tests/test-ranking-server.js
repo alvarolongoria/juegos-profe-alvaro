@@ -16,7 +16,13 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}) {
     const rows = [];
     const sheet = {
       rows,
-      appendRow: (row) => { rows.push(row.slice()); },
+      // Like Google Sheets, a text that looks like a date ("2026-11") becomes a
+      // Date cell, unless it starts with an apostrophe, which keeps it as text.
+      appendRow: (row) => {
+        rows.push(row.map((value) => (typeof value !== "string" ? value
+          : value.startsWith("'") ? value.slice(1)
+          : /^\d{4}-\d{1,2}(-\d{1,2})?$/.test(value) ? new FixedDate(`${value}-01T00:00:00Z`.slice(0, 20)) : value)));
+      },
       getLastRow: () => rows.length,
       getDataRange: () => ({ getValues: () => rows.map((r) => r.slice()) }),
     };
@@ -124,6 +130,15 @@ function monthlyTop() {
   check(top.top.every((e) => Object.keys(e).sort().join() === "name,points"), "S11 the top shares only the invented name and the points");
 }
 
+// A month cell that Sheets already turned into a date still counts for its month.
+function coercedMonth() {
+  const game = load();
+  add(game, { points: "300" });
+  game.sheets.Ranking.appendRow([new Date(), "2026-11", 5, "Lobo Feliz", 700]); // no apostrophe
+  const top = game.json({ action: "top", grade: "5" });
+  check(top.top.map((e) => e.name).join() === "Lobo Feliz,Tigre Veloz", `S11 a month stored as a date still shows in its month (${JSON.stringify(top.top)})`);
+}
+
 function callback() {
   const game = load();
   const wrapped = game.get({ action: "top", grade: "5", callback: "ranking_cb1" });
@@ -151,6 +166,7 @@ lists();
 saveValid();
 rejectInvalid();
 monthlyTop();
+coercedMonth();
 callback();
 rateLimit();
 unknownAction();

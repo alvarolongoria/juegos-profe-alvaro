@@ -68,13 +68,18 @@ function sheet() {
   return created;
 }
 
+// Sheets may have turned an older "2026-11" cell into a date: read both forms.
+function monthOf(value) {
+  return value instanceof Date ? Utilities.formatDate(value, TIME_ZONE, "yyyy-MM") : String(value);
+}
+
 function topOf(grade) {
   var month = currentMonth();
   var rows = sheet().getDataRange().getValues().slice(1);
   var entries = [];
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i];
-    if (String(row[1]) === month && Number(row[2]) === grade) entries.push({ name: String(row[3]), points: Number(row[4]) });
+    if (monthOf(row[1]) === month && Number(row[2]) === grade) entries.push({ name: String(row[3]), points: Number(row[4]) });
   }
   entries.sort(function (a, b) { return b.points - a.points; });
   return { month: month, top: entries.slice(0, TOP_SIZE) };
@@ -101,7 +106,8 @@ function add(params) {
     var count = Number(cache.get(key) || 0);
     if (count >= MAX_ADDS_PER_MINUTE) return { ok: false, error: "too many" };
     cache.put(key, String(count + 1), 120);
-    sheet().appendRow([new Date(), currentMonth(), grade, params.animal + " " + params.adjective, Number(params.points)]);
+    // The apostrophe keeps the month as text, so Sheets never turns it into a date.
+    sheet().appendRow([new Date(), "'" + currentMonth(), grade, params.animal + " " + params.adjective, Number(params.points)]);
   } finally {
     lock.releaseLock();
   }
