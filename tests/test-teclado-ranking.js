@@ -87,6 +87,8 @@ async function win(page, grade, checkEarly = false) {
     }
     if (!result.finished) throw new Error(`Could not finish level ${level + 1}`);
   }
+  // The trophy flight of the last win moves the overlay; click only once it lands.
+  await page.waitForFunction(() => !document.querySelector(".trophy-flight"), null, { polling: 100 });
 }
 
 const response = (top = [], grade = 5) => ({ ok: true, grade, month: "2026-11", top });
@@ -381,4 +383,6 @@ async function overlappingRequests() {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }
   }
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
+  // npm test stops at the first suite that exits with an error.
+  if (failCount) process.exitCode = 1;
 })().catch((e) => { error(e); process.exitCode = 1; });
