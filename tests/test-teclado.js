@@ -100,6 +100,85 @@ async function chromebookAccents() {
   await finish(game);
 }
 
+// S2: in 6º every third wrong key costs a heart; 5º keeps only the broken streak.
+async function errorHearts() {
+  for (const grade of [6, 5]) {
+    const game = await openGame("juegos/teclado.html");
+    const { page } = game;
+    await chooseGrade(page, grade);
+    await nextShip(page);
+    const stats = () => page.locator("#stats").textContent();
+    // "#" starts no text, so each press is a wrong key with no ship locked.
+    await typeChar(page, "#");
+    await typeChar(page, "#");
+    if (grade === 6) {
+      check(await data(page, "hearts") === "3" && /\nFallos: 2\/3/.test(await stats()), `S2 6º two wrong keys keep the hearts and show "Fallos: 2/3" (${JSON.stringify(await stats())})`);
+      await typeChar(page, "#");
+      check(await data(page, "hearts") === "2", "S2 6º third wrong key costs one heart");
+      check(/\nFallos: 0\/3/.test(await stats()), `S2 6º the error count starts again after the lost heart (${JSON.stringify(await stats())})`);
+      for (let i = 0; i < 6; i++) await typeChar(page, "#");
+      check(await data(page, "hearts") === "0" && /Inténtalo otra vez/.test(await overlayText(page)), "S2 6º losing the last heart to errors shows the try-again screen");
+      await pressPlay(page);
+      check(await data(page, "hearts") === "3", "S2 6º the retried level starts with full hearts");
+    } else {
+      await typeChar(page, "#");
+      check(await data(page, "hearts") === "3" && !/Fallos/.test(await stats()), "S2 5º wrong keys never cost hearts");
+    }
+    await finish(game);
+  }
+}
+
+// S3: from level 2 in 5º and 6º, red trap ships must not be typed.
+async function trapShips() {
+  const trap = '.ship[data-kind="trap"]';
+  // 4º never gets traps, and 5º-6º never get them in level 1.
+  for (const [grade, level, goal] of [[4, 2, 7], [5, 1, 5], [6, 1, 5]]) {
+    const game = await openGame("juegos/teclado.html");
+    const { page } = game;
+    await chooseGrade(page, grade);
+    if (level === 2) await playLevel(page, 5, null, `${grade}º level 1`);
+    let traps = 0;
+    for (let i = 0; i < goal; i++) {
+      traps += await page.locator(trap).count();
+      await typeText(page, await nextShip(page));
+    }
+    check(traps === 0, `S3 ${grade}º level ${level} has no trap ships`);
+    await finish(game);
+  }
+  for (const grade of [5, 6]) {
+    const game = await openGame("juegos/teclado.html");
+    const { page } = game;
+    await chooseGrade(page, grade);
+    await playLevel(page, 5, null, `${grade}º level 1`);
+    // Keep shooting normal ships until a trap shows up in level 2.
+    let found = null;
+    for (let i = 0; i < 200 && !found; i++) {
+      if (await page.locator(trap).count()) found = await page.locator(trap).first().getAttribute("data-text");
+      else if (await page.locator(normalShip).count()) await typeText(page, await nextShip(page));
+      else await page.waitForTimeout(100);
+    }
+    check(!!found && await data(page, "level") === "1", `S3 ${grade}º level 2 sends a trap ship (${found})`);
+    if (!found) { await finish(game); continue; }
+    const label = await page.locator(trap).first().getAttribute("aria-label");
+    check(/trampa/i.test(label || ""), `S3 ${grade}º the trap is announced as a trap (${label})`);
+    if (grade === 5) {
+      // Never typed, the trap reaches the ground and costs nothing.
+      for (let i = 0; i < 600 && await page.locator(trap).count() && await data(page, "level") === "1"; i++) {
+        if (await page.locator(normalShip).count()) await typeText(page, await nextShip(page));
+        else await page.waitForTimeout(100);
+      }
+      check(await page.locator(trap).count() === 0 && await data(page, "level") === "1" && await data(page, "hearts") === "3", `S3 5º a trap that lands costs nothing`);
+    } else {
+      const before = await score(page);
+      await typeChar(page, found[0]);
+      check(await data(page, "hearts") === "2", `S3 6º shooting the trap "${found}" costs a heart`);
+      check(await page.locator(trap).count() === 0, "S3 6º the shot trap disappears");
+      check(await score(page) === before, "S3 6º a shot trap does not count as a destroyed ship");
+    }
+    await finish(game);
+  }
+}
+
 async function chooseGrade(page, grade) {
   await page.waitForSelector(".overlay .grade-btn");
   await page.click(`.overlay .grade-btn[data-grade="${grade}"]`, { force: true });
@@ -207,7 +286,8 @@ async function finishWithClock(page) {
     for (let i = 0; i < 1000 && !document.querySelector(".overlay") && document.body.dataset.level === level; i++) {
       window.randomValue = ((i * 37) % 99 + 0.5) / 100;
       window.advanceFrames(50);
-      const target = document.querySelector(".ship");
+      // A careful typist never shoots a red trap ship.
+      const target = document.querySelector('.ship:not([data-kind="trap"])');
       if (!target) continue;
       if (!target.dataset.kind || target.dataset.kind === "ship") seen.push(target.dataset.text);
       for (const key of target.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
@@ -811,5 +891,7 @@ async function arcadeContracts() {
   await realTypist();
   await liveStatsStart();
   await chromebookAccents();
+  await errorHearts();
+  await trapShips();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 })().catch((error) => { console.error(error); console.error(`TOTAL before error: ${okCount} ok, ${failCount} FAIL`); process.exit(1); });

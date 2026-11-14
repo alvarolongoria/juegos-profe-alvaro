@@ -33,6 +33,11 @@
       .ship.wrong .label { background: #c4b5ef; }
       .ship.frozen svg { filter: drop-shadow(0 0 8px #9fe3f0); }
       .ship.frozen .label { background: #b9eff8; border-color: #4c9ec2; }
+      /* Trap ships are red: reading before typing is part of the challenge. */
+      .ship[data-kind="trap"] .label { background: #e0404a; border-color: #7a1020; color: #fff7e4; }
+      .ship[data-kind="trap"] svg { filter: drop-shadow(0 0 8px #ff5a64); }
+      #level-banner.warn { font-size: clamp(26px, 3.4vw, 44px); text-align: center; white-space: pre-line; }
+      #level-banner.warn.show { animation-duration: 3.5s; }
       #cannon { position: fixed; left: 50%; bottom: 0; width: 120px; height: 96px; margin-left: -60px; z-index: 30; pointer-events: none; }
       #cannon .barrel { transform-origin: 60px 70px; transition: transform 0.08s; }
       #cannon.impact { animation: cannon-hit .45s ease-out; filter: drop-shadow(0 0 18px #fb7d83); }
@@ -132,6 +137,7 @@
         6: [2, 1.7, 1.45, 1.3],
       };
       const HEARTS = 3;
+      const ERRORS_PER_HEART = 3;
       const SPECIALS = {
         heart: { text: "vida", name: "Corazón", art: '<path d="M37 49C27 41 10 30 10 20 10 6 27 3 37 15 47 3 64 6 64 20c0 10-17 21-27 29z" fill="#fb7d83"/>' },
         ice: { text: "hielo", name: "Hielo", art: '<circle cx="37" cy="28" r="23" fill="#b9eff8"/><path d="M37 8v40M19 18l36 20M19 38l36-20M31 12l6 6 6-6M31 44l6-6 6 6M21 25l7-2-2-7M53 31l-7 2 2 7M21 31l7 2-2 7M53 25l-7-2 2-7" fill="none" stroke-linecap="round"/>' },
@@ -139,6 +145,7 @@
         meteor: { text: null, name: "Meteorito", art: '<path d="M14 5q16 4 25 10L64 6 55 26q7 12-1 22-10 12-26 3-15-8-14-23z" fill="#ffb052"/><circle cx="37" cy="33" r="15" fill="#ad9df0"/><circle cx="32" cy="28" r="3" fill="#fff7e4" stroke="none"/><circle cx="43" cy="38" r="3" fill="#52699a" stroke="none"/>' },
       };
       const SHIP_ART = '<path d="M37 4c-10 0-16 10-16 20h32c0-10-6-20-16-20z" fill="#9fe3f0"/><path d="M4 30q33-14 66 0l-8 14H12z" fill="#ad9df0"/><circle cx="22" cy="36" r="3" fill="#ffcc58"/><circle cx="37" cy="38" r="3" fill="#ffcc58"/><circle cx="52" cy="36" r="3" fill="#ffcc58"/><path d="M22 44l-4 9m34-9 4 9" fill="none"/>';
+      const TRAP_ART = SHIP_ART.replace("#9fe3f0", "#ffb3b3").replace("#ad9df0", "#e0404a");
       const MOTHER_ART = '<path d="M20 25q3-19 17-20 14 1 17 20z" fill="#ffcc58"/><path d="M2 29q35-14 70 0L62 45H12z" fill="#efaa63"/><path d="M10 34h54M18 44l-6 8m44-8 6 8" fill="none"/><circle cx="24" cy="36" r="3" fill="#fff7e4"/><circle cx="37" cy="37" r="3" fill="#fff7e4"/><circle cx="50" cy="36" r="3" fill="#fff7e4"/>';
 
       const sky = document.getElementById("sky");
@@ -166,14 +173,18 @@
       let interval = 0;
       let shipsSinceSpecial = 0;
       let shipsSinceMother = 0;
+      let shipsSinceTrap = 0;
       let motherDebt = 0;
       let freezeRemaining = 0;
+      let errors = 0; // 6º: every ERRORS_PER_HEART wrong keys cost a heart
       let lastText = "";
       let stats = null;
       let lastFrame = 0;
 
       // 1º-2º accept capitals for lowercase text; 3º and up must match exactly.
       const same = (a, b) => (grade >= 3 ? a === b : a.toLowerCase() === b.toLowerCase());
+      // From level 2, 5º and 6º get red trap ships that must not be typed.
+      const trapsOn = () => grade >= 5 && level >= 1;
       const isThreat = (ship) => ship.kind === "ship" || ship.kind === "mother" || ship.kind === "child";
       const multiplier = () => stats.streak >= 20 ? 2 : stats.streak >= 10 ? 1.5 : 1;
       const currentSpeed = () => stats.correct / Math.max(1 / 60, (performance.now() - stats.start) / 60000);
@@ -201,20 +212,27 @@
             const settled = performance.now() - stats.start >= PEAK_AFTER_MS;
             if (settled) stats.peak = Math.max(stats.peak, wpm);
             lines.push(`Palabras/min: ${wpm}`, `Máximo: ${settled || stats.peak ? stats.peak : "—"}`);
+            if (grade === 6) lines.push(`Fallos: ${errors}/${ERRORS_PER_HEART}`);
           }
         }
         statsBox.textContent = lines.join("\n");
         stats.lastPublished = performance.now();
       }
 
-      function spawnOne() {
+      function spawnOne(trap = false) {
         // Every object has a unique initial, so the first key selects it unambiguously.
         const taken = alive.map((s) => s.text[0].toLowerCase());
         const availableText = (pool) => pool.filter((t) => !taken.includes(t[0].toLowerCase()));
         const letters = words("a e i o u m p l s t").filter((letter) => !taken.includes(letter));
         const mother = alive.find((s) => s.kind === "mother");
         let kind = "ship", text = "";
-        if (mother) {
+        if (trap) {
+          // A real word from the level, so only reading tells it apart.
+          const pool = availableText(config.levels[level]).filter((t) => !alive.some((s) => s.text === t));
+          if (!pool.length) return null;
+          kind = "trap";
+          text = Juegos.pick(pool);
+        } else if (mother) {
           kind = "child";
           // The sentence level launches short words, not another sentence.
           const source = grade >= 5 && level === 3 ? config.levels[0] : config.levels[level];
@@ -253,13 +271,14 @@
           lastText = text;
         }
         if (kind === "ship" || kind === "child") shipsSinceMother++;
+        if (kind === "ship") shipsSinceTrap++;
         if (kind === "ship" || kind === "child" || kind === "mother") shipsSinceSpecial++;
         const el = document.createElement("div");
         el.className = "ship";
         el.dataset.kind = kind;
         el.dataset.text = text;
         el.dataset.typed = "0";
-        const art = kind === "mother" ? MOTHER_ART : kind === "ship" || kind === "child" ? SHIP_ART : SPECIALS[kind].art;
+        const art = kind === "mother" ? MOTHER_ART : kind === "trap" ? TRAP_ART : kind === "ship" || kind === "child" ? SHIP_ART : SPECIALS[kind].art;
         el.innerHTML = `<svg viewBox="0 0 74 56" aria-hidden="true"><g stroke="#142341" stroke-width="4" stroke-linejoin="round">${art}</g></svg>`;
         const label = document.createElement("div");
         label.className = "label";
@@ -301,7 +320,8 @@
         done.textContent = ship.text.slice(0, ship.typed);
         ship.label.replaceChildren(done, ship.text.slice(ship.typed));
         ship.el.dataset.typed = ship.typed;
-        const name = ship.kind === "mother" ? "Nave nodriza" : ship.kind === "child" ? "Nave pequeña" : SPECIALS[ship.kind]?.name;
+        const name = ship.kind === "mother" ? "Nave nodriza" : ship.kind === "child" ? "Nave pequeña"
+          : ship.kind === "trap" ? "Nave trampa, no la escribas" : SPECIALS[ship.kind]?.name;
         ship.el.setAttribute("aria-label", name ? `${name}: ${ship.text}` : ship.text);
       }
 
@@ -372,7 +392,10 @@
           const max = grade === 1 ? config.max : 2;
           const normalCount = alive.filter(isThreat).length;
           if (playing && (alive.length === 0 || untilSpawn <= 0)) {
-            const spawned = alive.length < max && destroyed + normalCount < GOALS[level] ? spawnOne() : null;
+            // Traps are extra: they never take the slot of a ship the player needs.
+            const busy = alive.filter((s) => s.kind !== "trap").length;
+            const spawned = busy < max && destroyed + normalCount < GOALS[level] ? spawnOne() : null;
+            if (spawned?.kind === "ship" && trapsOn() && shipsSinceTrap >= 3 && !alive.some((s) => s.kind === "trap") && spawnOne(true)) shipsSinceTrap = 0;
             if (grade >= 2 && spawned?.kind === "mother") {
               // Split the mother's typing budget around its first launch. The
               // second half is charged along with the child's own characters.
@@ -392,6 +415,14 @@
       }
 
       let impactTimer, bannerTimer;
+      function shakeShield() {
+        cannon.classList.remove("impact");
+        void cannon.offsetWidth;
+        cannon.classList.add("impact");
+        clearTimeout(impactTimer);
+        impactTimer = setTimeout(() => cannon.classList.remove("impact"), 450);
+      }
+
       function hitCannon(ship) {
         const picture = ship.el.querySelector("svg");
         const from = picture.getBoundingClientRect(), to = cannon.getBoundingClientRect();
@@ -404,11 +435,7 @@
           const dy = to.top + to.height / 2 - from.top - from.height / 2;
           flying.animate([{ transform: "translate(0, 0) scale(1)" }, { transform: `translate(${dx}px, ${dy}px) scale(.3)` }], { duration: 300, easing: "ease-in" }).finished.catch(() => {}).then(() => flying.remove());
         }
-        cannon.classList.remove("impact");
-        void cannon.offsetWidth;
-        cannon.classList.add("impact");
-        clearTimeout(impactTimer);
-        impactTimer = setTimeout(() => cannon.classList.remove("impact"), 450);
+        shakeShield();
       }
 
       function land(ship) {
@@ -435,20 +462,25 @@
         untilSpawn = 0;
         shipsSinceSpecial = 0;
         shipsSinceMother = 0;
+        shipsSinceTrap = 0;
         motherDebt = 0;
         freezeRemaining = 0;
+        errors = 0;
         const pool = config.levels[level];
         const averageChars = pool.reduce((total, text) => total + text.length, 0) / pool.length;
         interval = grade === 1 ? config.every : averageChars * 12 / config.wpm[level];
         // The shared star bar has a fixed size, so each level gets a fresh one.
         document.querySelector(".progress")?.remove();
         progress = Juegos.progress(GOALS[level]);
-        levelBanner.textContent = `Nivel ${level + 1}`;
+        // The first level with traps warns about them before they arrive.
+        const warn = trapsOn() && level === 1;
+        levelBanner.textContent = warn ? `Nivel ${level + 1}\n¡No dispares a las naves rojas!` : `Nivel ${level + 1}`;
+        levelBanner.classList.toggle("warn", warn);
         levelBanner.classList.remove("show");
         void levelBanner.offsetWidth;
         levelBanner.classList.add("show");
         clearTimeout(bannerTimer);
-        bannerTimer = setTimeout(() => levelBanner.classList.remove("show"), 1800);
+        bannerTimer = setTimeout(() => levelBanner.classList.remove("show"), warn ? 3500 : 1800);
         publish();
         playing = true;
         holdFocus();
@@ -528,9 +560,31 @@
         if (destroyed >= GOALS[level]) finishLevel();
       }
 
+      // Shooting a trap breaks the streak and costs a heart, but is not a wrong key.
+      function shootTrap(ship) {
+        shoot(ship);
+        const box = ship.el.getBoundingClientRect();
+        Juegos.burst(box.left + box.width / 2, box.top + box.height / 2, "💥", 8);
+        removeShip(ship);
+        Juegos.sound.oops();
+        stats.streak = 0;
+        shakeShield();
+        hearts--;
+        publish();
+        if (hearts === 0) loseLevel();
+      }
+
       function wrong(ship) {
         Juegos.sound.oops();
         stats.streak = 0;
+        // 6º rewards accuracy: the third wrong key in a level shakes the shield.
+        if (grade === 6 && ++errors >= ERRORS_PER_HEART) {
+          errors = 0;
+          shakeShield();
+          hearts--;
+          publish();
+          if (hearts === 0) return loseLevel();
+        }
         publish();
         const target = ship || alive[0];
         target.el.classList.add("wrong");
@@ -578,6 +632,7 @@
           .filter((s) => same(s.text[0], key))
           .sort((a, b) => b.y - a.y)[0];
         if (!ship || !same(ship.text[ship.typed], key)) return wrong(locked);
+        if (ship.kind === "trap") return shootTrap(ship);
         stats.correct++;
         stats.streak++;
         stats.best = Math.max(stats.best, stats.streak);
