@@ -25,7 +25,7 @@ async function typeText(page, text) {
 }
 
 const normalShip = '.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"], .ship[data-kind="laser"]';
-const specials = '.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="meteor"]';
+const specials = '.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="star"]';
 const ships = (page) => page.$$eval(normalShip, (list) => list.map((s) => s.dataset.text));
 const score = (page) => page.locator(".progress span.on").count();
 let specialChars = 0, specialPoints = 0;
@@ -64,7 +64,7 @@ async function nextShip(page) {
       const text = await special.getAttribute("data-text");
       const kind = await special.getAttribute("data-kind");
       specialChars += text.length;
-      specialPoints += text.length * 10 + (kind === "meteor" || (kind === "heart" && await data(page, "hearts") === "3") ? 50 : 0);
+      specialPoints += text.length * 10 + (kind === "star" || (kind === "heart" && await data(page, "hearts") === "3") ? 50 : 0);
       await typeText(page, text);
     } else {
       await page.waitForSelector(".ship");
@@ -323,6 +323,99 @@ async function effectObjects() {
   }
 }
 
+// S10 (D9): halfway through level 4 every grade gets one announced burst of
+// single-letter meteors, one after another from three directions. No new ship
+// arrives meanwhile, every hit scores, and the whole burst costs one heart at most.
+async function meteorShower() {
+  const plan = { 1: 5, 3: 6, 5: 8 };
+  const alphabet = { 1: /^[aeioumplst]$/, 3: /^[a-z]$/, 5: /^[a-zñ]$/ };
+  for (const [grade, count] of Object.entries(plan)) {
+    for (const shoot of [false, true]) {
+      const game = await openGame("juegos/teclado.html");
+      const { page } = game;
+      await page.setViewportSize({ width: 1516, height: 694 });
+      await installFrameClock(page);
+      await chooseGrade(page, Number(grade));
+      // Levels 1 to 3 send no meteors.
+      await page.evaluate(() => {
+        window.meteorsSeen = 0;
+        new MutationObserver((list) => list.forEach((m) => m.addedNodes.forEach((n) => { if (n.dataset?.kind === "meteor") window.meteorsSeen++; })))
+          .observe(document.querySelector("#sky"), { childList: true });
+      });
+      for (let level = 0; level < 3; level++) {
+        await finishWithClock(page);
+        if (await page.locator(".overlay").count()) await pressPlay(page);
+      }
+      const early = await page.evaluate(() => window.meteorsSeen);
+      check(early === 0, `S10 ${grade}º levels 1-3 send no meteors (${early})`);
+      const run = await page.evaluate(({ shoot, count }) => {
+        const press = (key) => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+        const notice = document.querySelector("#shower-warning");
+        const score = () => Number(document.querySelector("#stats").textContent.match(/\d+/)?.[0] || 0);
+        const out = { level: document.body.dataset.level, announced: "", meteors: [], shipsDuring: 0, heartsBefore: null, heartsAfter: null, scoreBefore: 0, scoreAfter: 0, resumed: false };
+        const known = new WeakSet();
+        let phase = "before", frame = 0;
+        for (; frame < 6000 && document.body.dataset.level === "3" && !document.querySelector(".overlay"); frame++) {
+          window.randomValue = ((frame * 37) % 99 + 0.5) / 100;
+          window.advanceFrames(50);
+          const fresh = [...document.querySelectorAll(".ship")].filter((el) => !known.has(el));
+          fresh.forEach((el) => known.add(el));
+          const meteors = fresh.filter((el) => el.dataset.kind === "meteor");
+          if (phase === "before" && meteors.length) {
+            phase = "during";
+            out.announced = notice?.classList.contains("show") ? notice.textContent : "";
+            out.heartsBefore = document.body.dataset.hearts;
+            out.scoreBefore = score();
+          }
+          // The burst is over once all its meteors have come and gone.
+          if (phase === "during" && out.meteors.length >= count && !document.querySelector('.ship[data-kind="meteor"]')) {
+            out.heartsAfter = document.body.dataset.hearts;
+            out.scoreAfter = score();
+            phase = "after";
+          }
+          if (phase === "during") {
+            out.shipsDuring += fresh.filter((el) => el.dataset.kind !== "meteor").length;
+            for (const el of meteors) {
+              const box = el.getBoundingClientRect();
+              out.meteors.push({ text: el.dataset.text, frame, x: box.left + box.width / 2, el });
+            }
+            for (const m of out.meteors) {
+              if (m.dx === undefined && m.el.isConnected && frame > m.frame) m.dx = m.el.getBoundingClientRect().left + m.el.getBoundingClientRect().width / 2 - m.x;
+            }
+            // Ships already on screen are cleared so they cost no heart here.
+            for (const el of document.querySelectorAll('.ship:not([data-kind="meteor"])')) for (const key of el.dataset.text) press(key);
+            // Shoot a meteor one frame after it appears, once its direction is known.
+            if (shoot) for (const m of out.meteors) if (m.dx !== undefined && m.el.isConnected) press(m.text);
+            continue;
+          }
+          if (phase === "after" && fresh.some((el) => el.dataset.kind !== "meteor")) { out.resumed = true; break; }
+          // Before the burst, play the level as a fast player would.
+          const target = document.querySelector('.ship:not([data-kind="meteor"])');
+          if (target) for (const key of target.dataset.text) press(key);
+        }
+        out.meteors = out.meteors.map(({ el, ...m }) => m);
+        return out;
+      }, { shoot, count });
+      const label = `S10 ${grade}º${shoot ? " (shooting)" : ""}`;
+      check(run.level === "3" && run.meteors.length === count, `${label} level 4 sends one burst of ${count} meteors (${run.meteors.length})`);
+      check(run.announced === "¡Lluvia de meteoritos!", `${label} the burst is announced (${JSON.stringify(run.announced)})`);
+      check(run.meteors.every((m) => alphabet[grade].test(m.text)), `${label} every meteor is one lowercase letter of the grade (${run.meteors.map((m) => m.text).join("")})`);
+      check(new Set(run.meteors.map((m) => m.frame)).size === run.meteors.length, `${label} meteors arrive one after another, never together`);
+      const sides = new Set(run.meteors.map((m) => (m.dx > 2 ? "right" : m.dx < -2 ? "left" : "down")));
+      check(sides.size === 3, `${label} meteors come from three directions (${[...sides].join(" ")})`);
+      check(run.shipsDuring === 0, `${label} no new ship arrives during the burst (${run.shipsDuring})`);
+      check(run.resumed, `${label} ships come back after the burst`);
+      if (shoot) {
+        check(run.heartsAfter === run.heartsBefore && run.scoreAfter > run.scoreBefore, `${label} each hit meteor scores and costs nothing (${run.scoreBefore}->${run.scoreAfter})`);
+      } else {
+        check(Number(run.heartsBefore) - Number(run.heartsAfter) === 1, `${label} the whole burst landing costs exactly one heart (${run.heartsBefore}->${run.heartsAfter})`);
+      }
+      if (await page.locator(".overlay").count()) await pressPlay(page);
+      await finish(game);
+    }
+  }
+}
+
 async function chooseGrade(page, grade) {
   await page.waitForSelector(".overlay .grade-btn");
   await page.click(`.overlay .grade-btn[data-grade="${grade}"]`, { force: true });
@@ -470,7 +563,7 @@ async function probeSpecial(page, random, grade = 2, hurt = false, want = null) 
       for (let i = 0; i < 1600 && document.body.dataset.hearts === "3"; i++) step(50);
     }
     for (let i = 0; i < 2000; i++) {
-      const special = document.querySelector(want ? `.ship[data-kind="${want}"]` : '.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="meteor"]');
+      const special = document.querySelector(want ? `.ship[data-kind="${want}"]` : '.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="star"]');
       if (special) return { kind: special.dataset.kind, text: special.dataset.text, firstKind, hearts: document.body.dataset.hearts };
       // Type a ship only when it is about to land: two ships must be able to
       // share the sky, or the bomb and the ice never arrive (S8).
@@ -539,22 +632,22 @@ async function calibrationAndSpecials() {
 
   await page.setViewportSize({ width: 1516, height: 694 });
   const found = {};
-  // Each seed drives one object: the heart and the meteor from the normal slot,
+  // Each seed drives one object: the heart and the star from the normal slot,
   // the bomb and the ice from the two-ship rule (S8), which has its own pick.
-  for (const [want, random] of [["heart", 0.01], ["bomb", 0.26], ["ice", 0.51], ["meteor", 0.76]]) {
+  for (const [want, random] of [["heart", 0.01], ["bomb", 0.26], ["ice", 0.51], ["star", 0.76]]) {
     const probe = await probeSpecial(page, random, 2, false, want);
     if (probe.kind) found[probe.kind] = random;
     check(probe.firstKind === "ship", `S10 no special as first ship (${random})`);
   }
-  for (const kind of ["heart", "ice", "bomb", "meteor"]) check(kind in found, `S10 ${kind}: appears as a distinguishable object`);
+  for (const kind of ["heart", "ice", "bomb", "star"]) check(kind in found, `S10 ${kind}: appears as a distinguishable object`);
 
-  for (const kind of ["heart", "ice", "bomb", "meteor"]) {
+  for (const kind of ["heart", "ice", "bomb", "star"]) {
     if (!(kind in found)) continue;
     const probe1 = await probeSpecial(page, found[kind], 1, false, kind);
     check(probe1.kind === kind && /^[a-z]$/.test(probe1.text), `S10 ${kind}: 1º carries one letter`);
     const probe2 = await probeSpecial(page, found[kind], 2, false, kind);
     const expected = { heart: "vida", ice: "hielo", bomb: "bomba" }[kind];
-    check(probe2.kind === kind && (kind === "meteor" ? /^[a-z]$/.test(probe2.text) : probe2.text === expected), `S10 ${kind}: 2º uses the expected text`);
+    check(probe2.kind === kind && (kind === "star" ? /^[a-z]$/.test(probe2.text) : probe2.text === expected), `S10 ${kind}: 2º uses the expected text`);
     const svg = await page.locator(`.ship[data-kind="${kind}"] svg`).count();
     check(svg > 0, `S10 ${kind}: visible vector artwork`);
     const landed = await page.evaluate((kind) => {
@@ -572,7 +665,7 @@ async function calibrationAndSpecials() {
 
   // The PNGs stay in memory: no generated files outside the allowed surfaces.
   // Print a pixel-derived crop so the actual screenshot artwork can be inspected.
-  for (const kind of ["heart", "meteor"]) {
+  for (const kind of ["heart", "star"]) {
     if (!(kind in found)) continue;
     // Pick the middle of the same random bucket to keep the subject away from
     // the screen edge; let the previous shots' particles finish naturally.
@@ -642,7 +735,7 @@ async function calibrationAndSpecials() {
       const normal = document.querySelector('.ship[data-kind="ship"]');
       if (!special || !normal) return null;
       const starts = [...document.querySelectorAll(".ship")].map((el) => el.dataset.text[0].toLowerCase());
-      const maxSpecials = document.querySelectorAll('.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="meteor"]').length;
+      const maxSpecials = document.querySelectorAll('.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="star"]').length;
       const threats = [...document.querySelectorAll('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]')].length;
       const before = document.querySelectorAll(".progress span.on").length;
       for (const key of special.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
@@ -658,10 +751,10 @@ async function calibrationAndSpecials() {
     check(!!effect && (kind === "bomb" ? effect.gone && effect.gained === effect.threats : effect.frozenLook && effect.still && effect.resumed), `S10 ${kind}: effect on ordinary ships`);
   }
 
-  if ("meteor" in found) {
-    await probeSpecial(page, found.meteor, 2, false, "meteor");
-    const meteor = await page.evaluate(() => {
-      const el = document.querySelector('.ship[data-kind="meteor"]');
+  if ("star" in found) {
+    await probeSpecial(page, found.star, 2, false, "star");
+    const star = await page.evaluate(() => {
+      const el = document.querySelector('.ship[data-kind="star"]');
       const start = el.getBoundingClientRect();
       const hearts = document.body.dataset.hearts;
       window.advanceFrames(1000);
@@ -669,16 +762,21 @@ async function calibrationAndSpecials() {
       for (let i = 0; i < 400 && el.isConnected; i++) window.advanceFrames(50);
       return { dx: next.left - start.left, dy: next.top - start.top, landed: !el.isConnected, hearts, after: document.body.dataset.hearts };
     });
-    check(Math.abs(meteor.dx) > 5 && meteor.dy > 50 && meteor.landed && meteor.hearts === meteor.after, "S10 meteor falls fast diagonally and landing costs no heart");
-    await probeSpecial(page, found.meteor, 2, false, "meteor");
+    check(Math.abs(star.dx) > 5 && star.dy > 50 && star.landed && star.hearts === star.after, "S10 star falls fast diagonally and landing costs no heart");
+    await probeSpecial(page, found.star, 2, false, "star");
     const bonus = await page.evaluate(() => {
       const before = Number(document.querySelector("#stats").textContent.match(/\d+/)[0]);
-      const el = document.querySelector('.ship[data-kind="meteor"]');
+      const el = document.querySelector('.ship[data-kind="star"]');
       window.dispatchEvent(new KeyboardEvent("keydown", { key: el.dataset.text }));
       return Number(document.querySelector("#stats").textContent.match(/\d+/)[0]) - before;
     });
-    check(bonus > 10, "S10 meteor awards extra points");
-  } else check(false, "S10 meteor falls fast diagonally and landing costs no heart");
+    check(bonus > 10, "S10 star awards extra points");
+    // S10b: the harmless bonus is a shooting star, not a meteor, so it is
+    // never confused with the meteor shower of level 4.
+    await probeSpecial(page, found.star, 2, false, "star");
+    const starLabel = await page.locator('.ship[data-kind="star"]').getAttribute("aria-label");
+    check(/^Estrella fugaz: [a-z]$/.test(starLabel || ""), "S10b bonus is named a shooting star");
+  } else check(false, "S10 star falls fast diagonally and landing costs no heart");
   if (await page.locator(".overlay").count()) await pressPlay(page);
   await finish(game);
 }
@@ -1073,5 +1171,6 @@ async function arcadeContracts() {
   await noTrapShips();
   await swarmsAndLaser();
   await effectObjects();
+  await meteorShower();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 })().catch((error) => { console.error(error); console.error(`TOTAL before error: ${okCount} ok, ${failCount} FAIL`); process.exit(1); });

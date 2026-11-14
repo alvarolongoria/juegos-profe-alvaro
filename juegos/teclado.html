@@ -23,6 +23,8 @@
       /* S9: the laser ship announces itself before its tricky phrase lands. */
       #laser-warning { position: fixed; top: 22%; left: 50%; transform: translate(-50%, -50%); z-index: 46; padding: 4px 22px; border: 4px solid #fb7d83; border-radius: 18px; background: #2b1020ee; color: #fff7e4; font-size: clamp(24px, 3vw, 40px); font-weight: bold; text-shadow: 0 0 12px #fb7d83; opacity: 0; pointer-events: none; }
       #laser-warning.show { animation: laser-warning 1.6s ease-out forwards; }
+      #shower-warning { position: fixed; top: 22%; left: 50%; transform: translate(-50%, -50%); z-index: 46; padding: 4px 22px; border: 4px solid #ffb052; border-radius: 18px; background: #2b1a10ee; color: #fff7e4; font-size: clamp(24px, 3vw, 40px); font-weight: bold; text-shadow: 0 0 12px #ffb052; opacity: 0; pointer-events: none; }
+      #shower-warning.show { animation: laser-warning 2.2s ease-out forwards; }
       @keyframes laser-warning { 0% { opacity: 0; } 15%, 70% { opacity: 1; } 100% { opacity: 0; } }
       #shield { position: fixed; left: 20%; bottom: 10px; width: 60%; height: 19px; z-index: 20; overflow: hidden; border: 3px solid #9fe3f0; border-radius: 20px; background: #142341; box-shadow: 0 0 12px #55cbd1; }
       #shield-fill { height: 100%; width: 100%; background: #22c55e; transition: width .25s, background .25s; }
@@ -175,8 +177,22 @@
         heart: { text: "vida", name: "Corazón", art: '<path d="M37 49C27 41 10 30 10 20 10 6 27 3 37 15 47 3 64 6 64 20c0 10-17 21-27 29z" fill="#fb7d83"/>' },
         ice: { text: "hielo", name: "Hielo", art: '<circle cx="37" cy="28" r="23" fill="#b9eff8"/><path d="M37 8v40M19 18l36 20M19 38l36-20M31 12l6 6 6-6M31 44l6-6 6 6M21 25l7-2-2-7M53 31l-7 2 2 7M21 31l7 2-2 7M53 25l-7-2 2-7" fill="none" stroke-linecap="round"/>' },
         bomb: { text: "bomba", name: "Bomba", art: '<circle cx="35" cy="33" r="19" fill="#52699a"/><path d="M35 14v-5q0-5 8-5" fill="none" stroke-linecap="round"/><path d="M46 3l3 3 4-2-1 5 4 3-5 1-1 5-3-4-5 1 2-5-3-3 5-1z" fill="#ffcc58"/><circle cx="28" cy="27" r="4" fill="#fff7e4" stroke="none"/>' },
-        meteor: { text: null, name: "Meteorito", art: '<path d="M14 5q16 4 25 10L64 6 55 26q7 12-1 22-10 12-26 3-15-8-14-23z" fill="#ffb052"/><circle cx="37" cy="33" r="15" fill="#ad9df0"/><circle cx="32" cy="28" r="3" fill="#fff7e4" stroke="none"/><circle cx="43" cy="38" r="3" fill="#52699a" stroke="none"/>' },
+        // S10b: a harmless bonus drawn as a shooting star, so it is never
+        // mistaken for the meteor shower of level 4.
+        star: { text: null, name: "Estrella fugaz", art: '<path d="M4 6q18 10 26 18M10 2q16 12 24 20M2 16q16 6 26 12" fill="none" stroke="#ffcc58" stroke-linecap="round"/><path d="M48 6l5 11 12 1-9 8 3 12-11-6-11 6 3-12-9-8 12-1z" fill="#ffe27a"/><circle cx="46" cy="22" r="2" fill="#142341" stroke="none"/><circle cx="53" cy="22" r="2" fill="#142341" stroke="none"/>' },
       };
+      // S10 (D9): halfway through level 4 a burst of single-letter meteors
+      // falls one after another from three directions. Lowercase letters of
+      // each grade, without accents; 5º and 6º add ñ.
+      const SHOWER = {
+        1: { count: 5, every: 1.1, fall: 4.2, letters: "aeioumplst" },
+        2: { count: 5, every: 1.1, fall: 4.2, letters: "abcdefgilmnoprstuv" },
+        3: { count: 6, every: 0.8, fall: 3.2, letters: "abcdefghijklmnopqrstuvwxyz" },
+        4: { count: 6, every: 0.8, fall: 3.2, letters: "abcdefghijklmnopqrstuvwxyz" },
+        5: { count: 8, every: 0.55, fall: 2.4, letters: "abcdefghijklmnñopqrstuvwxyz" },
+        6: { count: 8, every: 0.55, fall: 2.4, letters: "abcdefghijklmnñopqrstuvwxyz" },
+      };
+      const METEOR_ART = '<path d="M64 4 46 20M70 14 52 26M56 0 42 16" fill="none" stroke="#ffb052" stroke-linecap="round"/><path d="M14 30 18 18 30 12 42 16 48 28 44 42 32 50 18 46z" fill="#9aa7b8"/><circle cx="26" cy="26" r="4" fill="#77859a" stroke="none"/><circle cx="36" cy="38" r="3" fill="#77859a" stroke="none"/>';
       const SHIP_ART = '<path d="M37 4c-10 0-16 10-16 20h32c0-10-6-20-16-20z" fill="#9fe3f0"/><path d="M4 30q33-14 66 0l-8 14H12z" fill="#ad9df0"/><circle cx="22" cy="36" r="3" fill="#ffcc58"/><circle cx="37" cy="38" r="3" fill="#ffcc58"/><circle cx="52" cy="36" r="3" fill="#ffcc58"/><path d="M22 44l-4 9m34-9 4 9" fill="none"/>';
       const MOTHER_ART = '<path d="M20 25q3-19 17-20 14 1 17 20z" fill="#ffcc58"/><path d="M2 29q35-14 70 0L62 45H12z" fill="#efaa63"/><path d="M10 34h54M18 44l-6 8m44-8 6 8" fill="none"/><circle cx="24" cy="36" r="3" fill="#fff7e4"/><circle cx="37" cy="37" r="3" fill="#fff7e4"/><circle cx="50" cy="36" r="3" fill="#fff7e4"/>';
       // S9: the laser ship has a drawing of its own, not a recoloured normal ship.
@@ -193,6 +209,10 @@
       laserNotice.id = "laser-warning";
       laserNotice.textContent = "¡Nave láser!";
       document.body.appendChild(laserNotice);
+      const showerNotice = document.createElement("div");
+      showerNotice.id = "shower-warning";
+      showerNotice.textContent = "¡Lluvia de meteoritos!";
+      document.body.appendChild(showerNotice);
       const cannon = document.getElementById("cannon");
       const barrel = document.querySelector("#cannon .barrel");
       const trophies = Juegos.trophies(4);
@@ -219,6 +239,9 @@
       let freezeRemaining = 0;
       let errors = 0; // 6º: every ERRORS_PER_HEART wrong keys cost a heart
       let lastText = "";
+      // S10 (D9): the meteor burst of level 4. null before it starts and after
+      // it ends; while it lasts no new ship arrives.
+      let shower = null, showerDone = false;
       let stats = null;
       let lastFrame = 0;
 
@@ -294,7 +317,7 @@
           });
           if (available.length) {
             kind = Juegos.pick(available);
-            text = grade === 1 || kind === "meteor" ? Juegos.pick(letters) : SPECIALS[kind].text;
+            text = grade === 1 || kind === "star" ? Juegos.pick(letters) : SPECIALS[kind].text;
             shipsSinceSpecial = 0;
           }
         }
@@ -387,6 +410,47 @@
         }
       }
 
+      // One meteor of the burst, entering from the top left, centre or right
+      // in turn. It prefers a letter no object on screen starts with, so the
+      // first key still picks it; it falls fast and never counts as a ship.
+      function spawnMeteor(index) {
+        const rule = SHOWER[grade];
+        const taken = alive.map((s) => s.text[0].toLowerCase());
+        const all = [...rule.letters];
+        const free = all.filter((letter) => !taken.includes(letter));
+        const text = Juegos.pick(free.length ? free : all);
+        const el = document.createElement("div");
+        el.className = "ship";
+        el.dataset.kind = "meteor";
+        el.dataset.text = text;
+        el.dataset.typed = "0";
+        el.innerHTML = `<svg viewBox="0 0 74 56" aria-hidden="true"><g stroke="#142341" stroke-width="4" stroke-linejoin="round">${METEOR_ART}</g></svg>`;
+        const label = document.createElement("div");
+        label.className = "label";
+        el.appendChild(label);
+        sky.appendChild(el);
+        const width = el.offsetWidth;
+        const side = index % 3; // 0 left, 1 centre, 2 right
+        const x = side === 0 ? 20 : side === 1 ? (innerWidth - width) / 2 : innerWidth - width - 20;
+        const ship = { el, label, text, kind: "meteor", typed: 0, x, y: 90, dx: 0 };
+        // A diagonal that ends inside the screen at the ground.
+        const drop = Math.max(1, groundY() - 90 - el.offsetHeight);
+        ship.vy = drop / rule.fall;
+        ship.dx = side === 1 ? 0 : (side === 0 ? 1 : -1) * Math.min(innerWidth / 3, drop) / rule.fall;
+        drawLabel(ship);
+        alive.push(ship);
+        place(ship);
+        return ship;
+      }
+
+      function startShower() {
+        shower = { launched: 0, untilNext: 0, hurt: false };
+        showerDone = true;
+        showerNotice.classList.remove("show");
+        void showerNotice.offsetWidth;
+        showerNotice.classList.add("show");
+      }
+
       function drawLabel(ship) {
         const done = document.createElement("span");
         done.className = "done";
@@ -394,7 +458,8 @@
         ship.label.replaceChildren(done, ship.text.slice(ship.typed));
         ship.el.dataset.typed = ship.typed;
         const name = ship.kind === "mother" ? "Nave nodriza" : ship.kind === "child" ? "Nave pequeña"
-          : ship.kind === "laser" ? "Nave láser: no falles su palabra" : SPECIALS[ship.kind]?.name;
+          : ship.kind === "laser" ? "Nave láser: no falles su palabra" : ship.kind === "meteor" ? "Meteorito"
+          : SPECIALS[ship.kind]?.name;
         ship.el.setAttribute("aria-label", name ? `${name}: ${ship.text}` : ship.text);
       }
 
@@ -444,6 +509,14 @@
           const frozenAtStart = freezeRemaining;
           freezeRemaining = Math.max(0, freezeRemaining - dt);
           for (const ship of [...alive]) {
+            if (ship.kind === "meteor") {
+              ship.y += ship.vy * dt;
+              ship.x += ship.dx * dt;
+              place(ship);
+              if (ship.y + ship.el.offsetHeight >= ground) land(ship);
+              if (!playing) break;
+              continue;
+            }
             // From 2º onwards a normal descent lasts SLACK times the spawn
             // interval, and that margin shrinks level by level.
             // Recalculate from the actual ground and object height on every frame.
@@ -453,12 +526,26 @@
             ship.el.classList.toggle("frozen", isThreat(ship) && freezeRemaining > 0);
             // Children descend faster than their mother, but leave enough
             // time for a player typing her longer word at the target WPM.
-            const speedFactor = ship.kind === "meteor" ? 3 : ship.kind === "mother" ? 0.65 : ship.kind === "child" ? 0.75 : 1;
+            const speedFactor = ship.kind === "star" ? 3 : ship.kind === "mother" ? 0.65 : ship.kind === "child" ? 0.75 : 1;
             ship.y += speed * speedFactor * moving;
-            if (ship.kind === "meteor") ship.x += ship.dx * dt;
+            if (ship.kind === "star") ship.x += ship.dx * dt;
             place(ship);
             if (ship.y + ship.el.offsetHeight >= ground) land(ship);
             if (!playing) break;
+          }
+          // S10 (D9): halfway through level 4 the burst starts. It holds the
+          // ship schedule, so the level keeps its words per minute.
+          if (playing && level === 3 && !showerDone && destroyed >= GOALS[level] / 2) startShower();
+          if (playing && shower) {
+            shower.untilNext -= dt;
+            if (shower.launched < SHOWER[grade].count && shower.untilNext <= 0) {
+              spawnMeteor(shower.launched++);
+              shower.untilNext = SHOWER[grade].every;
+            }
+            if (shower.launched >= SHOWER[grade].count && !alive.some((s) => s.kind === "meteor")) shower = null;
+            if (now - stats.lastPublished >= 1000) publish();
+            requestAnimationFrame(tick);
+            return;
           }
           untilSpawn -= dt;
           // An empty sky gets an object at once, even between scheduled spawns.
@@ -540,8 +627,20 @@
       function land(ship) {
         const box = ship.el.getBoundingClientRect();
         Juegos.burst(box.left + box.width / 2, box.bottom, "💥", 6);
-        if (isThreat(ship)) hitCannon(ship);
+        // S10 (D9): only the first meteor that lands costs a heart; the rest of
+        // the same burst cost nothing.
+        const hurtingMeteor = ship.kind === "meteor" && shower && !shower.hurt;
+        if (isThreat(ship) || hurtingMeteor) hitCannon(ship);
         removeShip(ship);
+        if (ship.kind === "meteor") {
+          if (!hurtingMeteor) return;
+          shower.hurt = true;
+          Juegos.sound.oops();
+          hearts--;
+          publish();
+          if (hearts === 0) loseLevel();
+          return;
+        }
         // Specials are opportunities, never a penalty if the player misses them.
         if (!isThreat(ship)) return;
         Juegos.sound.oops();
@@ -567,6 +666,8 @@
         motherDebt = 0;
         freezeRemaining = 0;
         errors = 0;
+        shower = null;
+        showerDone = false;
         const pool = config.levels[level];
         const averageChars = pool.reduce((total, text) => total + text.length, 0) / pool.length;
         interval = grade === 1 ? config.every : averageChars * 12 / config.wpm[level];
@@ -653,7 +754,7 @@
             stats.destroyed++;
             stats.score += target.text.length * 10 * multiplier() * (target.kind === "mother" ? 2 : 1);
           }
-        } else if (ship.kind === "meteor") {
+        } else if (ship.kind === "star") {
           stats.score += 50;
         }
         progress.set(destroyed);
