@@ -24,7 +24,7 @@ async function typeText(page, text) {
   for (const ch of text) await typeChar(page, ch);
 }
 
-const normalShip = '.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]';
+const normalShip = '.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"], .ship[data-kind="laser"]';
 const specials = '.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="meteor"]';
 const ships = (page) => page.$$eval(normalShip, (list) => list.map((s) => s.dataset.text));
 const score = (page) => page.locator(".progress span.on").count();
@@ -157,9 +157,108 @@ async function noTrapShips() {
         return { level: start, announced, kinds: [...kinds], over };
       });
       check(seen.level === String(index) && seen.over && !seen.kinds.includes("trap"), `S4 ${grade}º level ${index + 1} sends only ships meant to be typed (${seen.kinds.join(" ") || "none"})`);
-      if (index > 0) check(!/roja/i.test(seen.announced.text) && !seen.announced.warned, `S4 ${grade}º level ${index + 1} banner only announces the level (${JSON.stringify(seen.announced.text)})`);
+      if (index > 0) check(!/roja/i.test(seen.announced.text) && (index === 2 || !seen.announced.warned), `S4 ${grade}º level ${index + 1} banner never warns about red ships (${JSON.stringify(seen.announced.text)})`);
       if (await page.locator(".overlay").count()) await pressPlay(page);
     }
+    await finish(game);
+  }
+}
+
+// S5 (D3): level 3 of 5º and 6º sends waves of four short accented words and
+// announces them. S5 (D4): a bigger, glowing laser ship punishes a wrong key.
+async function swarmsAndLaser() {
+  for (const grade of [5, 6, 4]) {
+    const game = await openGame("juegos/teclado.html");
+    const { page } = game;
+    await page.setViewportSize({ width: 1516, height: 694 });
+    await installFrameClock(page);
+    await chooseGrade(page, grade);
+    // Levels 1 and 2 keep the old pace: no swarm words and no laser ship.
+    for (let level = 0; level < 2; level++) {
+      const done = await finishWithClock(page);
+      check(done.finished && done.seen.length > 0 && done.seen.every((t) => !swarmWords[5].includes(t) && !swarmWords[6].includes(t)), `S5 ${grade}º level ${level + 1} sends no swarm words`);
+    }
+    // Play level 3 on the frame clock, typing a ship only when it is about to
+    // land: the hearts stay full and the level does not end early.
+    const seen = await page.evaluate(() => {
+      const step = window.advanceFrames;
+      const banner = document.querySelector("#level-banner");
+      const out = { announced: banner.textContent, warned: banner.classList.contains("warn"), waves: [], kinds: [], laser: null, maxLasers: 0 };
+      const known = new WeakSet(), kinds = new Set();
+      for (let i = 0; i < 4000 && !out.laser && !document.querySelector(".overlay") && document.body.dataset.level === "2"; i++) {
+        window.randomValue = ((i * 37) % 99 + 0.5) / 100;
+        step(50);
+        const ships = [...document.querySelectorAll(".ship")];
+        const fresh = ships.filter((el) => !known.has(el));
+        fresh.forEach((el) => known.add(el));
+        ships.forEach((el) => kinds.add(el.dataset.kind));
+        out.maxLasers = Math.max(out.maxLasers, document.querySelectorAll('.ship[data-kind="laser"]').length);
+        if (fresh.length > 3) out.waves.push(fresh.map((el) => el.dataset.text));
+        const laser = document.querySelector('.ship[data-kind="laser"]');
+        if (laser) {
+          out.laser = { text: laser.dataset.text, label: laser.getAttribute("aria-label"), width: laser.querySelector("svg").getBoundingClientRect().width };
+          break;
+        }
+        const low = ships.filter((el) => el.dataset.kind !== "laser").sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
+        if (low && low.getBoundingClientRect().bottom > innerHeight - 170) for (const key of low.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      }
+      out.kinds = [...kinds];
+      return out;
+    });
+    if (grade === 4) {
+      check(!/enjambres/i.test(seen.announced) && !seen.warned, `S5 4º level 3 announces only the level (${JSON.stringify(seen.announced)})`);
+      check(seen.waves.length === 0 && !seen.kinds.includes("laser"), `S5 4º level 3 has no swarms and no laser ship (${seen.kinds.join(" ")})`);
+      await finish(game);
+      continue;
+    }
+    check(/enjambres/i.test(seen.announced) && seen.warned, `S5 ${grade}º level 3 warns about the swarms (${JSON.stringify(seen.announced)})`);
+    const wave = seen.waves[0] || [];
+    check(wave.length === 4 && wave.every((t) => t.length <= 6 && /[áéíóúü]/i.test(t) && swarmWords[grade].includes(t)), `S5 ${grade}º level 3 sends waves of four short accented words (${wave.join(" ")})`);
+    const big = !!seen.laser && /láser/i.test(seen.laser.label || "") && seen.laser.width > 90;
+    check(big && seen.maxLasers === 1, `S5 ${grade}º level 3 sends one big laser ship (${seen.laser?.text}, ${seen.laser?.width}px, ${seen.laser?.label})`);
+    // A wrong key inside a started laser word fires its laser and costs a heart.
+    const probe = await page.evaluate(() => {
+      const laser = document.querySelector('.ship[data-kind="laser"]');
+      if (!laser) return null;
+      const text = laser.dataset.text;
+      const press = (key) => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      const fallos = () => (document.querySelector("#stats").textContent.match(/Fallos: (\d)\/3/) || [])[1] ?? null;
+      const hearts = () => document.body.dataset.hearts;
+      const before = { hearts: hearts(), fallos: fallos() };
+      press("#"); // no word started yet: the mistake is still a plain wrong key
+      const untouched = { hearts: hearts(), fallos: fallos() };
+      press(text[0]);
+      const started = laser.dataset.typed;
+      press(text[1] === "z" ? "q" : "z"); // a wrong key inside the started word
+      const fired = { hearts: hearts(), fallos: fallos(), beams: document.querySelectorAll(".laser.enemy").length };
+      for (const key of text.slice(1)) press(key); // finish the word, one heart lighter
+      return { before, untouched, started, fired };
+    });
+    if (!probe) check(false, `S5 ${grade}º a wrong key inside the laser word costs exactly one heart`);
+    else {
+      check(probe.untouched.hearts === probe.before.hearts && (grade === 5 ? probe.untouched.fallos === null : Number(probe.untouched.fallos) === Number(probe.before.fallos) + 1), `S5 ${grade}º a wrong key with no started laser word behaves as before`);
+      check(probe.started === "1" && Number(probe.before.hearts) - Number(probe.fired.hearts) === 1, `S5 ${grade}º a wrong key inside the laser word costs exactly one heart`);
+      check(probe.fired.beams > 0, `S5 ${grade}º the laser ship answers with a visible laser`);
+      if (grade === 6) check(probe.fired.fallos === probe.untouched.fallos, `S5 6º the laser mistake does not count towards "Fallos: n/3"`);
+    }
+    // Level 4 keeps the laser ship, still one at a time.
+    await finishWithClock(page);
+    const late = await page.evaluate(() => {
+      const step = window.advanceFrames;
+      const out = { found: false, max: 0, level: document.body.dataset.level };
+      for (let i = 0; i < 3000 && !out.found && !document.querySelector(".overlay") && document.body.dataset.level === "3"; i++) {
+        window.randomValue = ((i * 37) % 99 + 0.5) / 100;
+        step(50);
+        const lasers = document.querySelectorAll('.ship[data-kind="laser"]');
+        out.max = Math.max(out.max, lasers.length);
+        out.found ||= lasers.length > 0;
+        const low = [...document.querySelectorAll(".ship")].filter((el) => el.dataset.kind !== "laser").sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
+        if (low && low.getBoundingClientRect().bottom > innerHeight - 170) for (const key of low.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      }
+      return out;
+    });
+    check(late.level === "3" && late.found && late.max === 1, `S5 ${grade}º level 4 also sends the laser ship, one at a time`);
+    if (await page.locator(".overlay").count()) await pressPlay(page);
     await finish(game);
   }
 }
@@ -240,6 +339,11 @@ const pools = {
   ],
 };
 const demand = { 2: [4, 6, 8, 10], 3: [6, 8, 11, 14], 4: [8, 11, 14, 18], 5: [10, 14, 18, 24], 6: [12, 17, 23, 30] };
+// S5 swarms: the short accented words level 3 mixes with its normal content.
+const swarmWords = {
+  5: "mamá papá sofá café ratón avión limón jamón camión lápiz bebé menú melón árbol".split(" "),
+  6: "música lápiz cámara página física médico rápido débil fácil hélice".split(" "),
+};
 // How much longer a ship takes to land than typing it needs at the target:
 // it shrinks level by level and stays generous for the youngest grades.
 const slack = { 2: [2, 1.9, 1.75, 1.6], 3: [2, 1.8, 1.6, 1.45], 4: [2, 1.75, 1.55, 1.4], 5: [2, 1.7, 1.45, 1.35], 6: [2, 1.7, 1.45, 1.3] };
@@ -268,7 +372,7 @@ async function finishWithClock(page) {
   return page.evaluate(() => {
     const seen = [];
     const level = document.body.dataset.level;
-    for (let i = 0; i < 1000 && !document.querySelector(".overlay") && document.body.dataset.level === level; i++) {
+    for (let i = 0; i < 3000 && !document.querySelector(".overlay") && document.body.dataset.level === level; i++) {
       window.randomValue = ((i * 37) % 99 + 0.5) / 100;
       window.advanceFrames(50);
       const target = document.querySelector(".ship");
@@ -344,9 +448,10 @@ async function calibrationAndSpecials() {
       check(result.finished, `S9 ${grade}º level ${level + 1}: finishes through keyboard`);
       if (grade === 5 && level < 3) {
         const pattern = level === 0 ? /^[a-zñ]{5,7}$/ : level === 1 ? /^(?=.{5,7}$)(?=.*(?:ñ|j|g|z|ll|rr))[a-zñ]+$/ : /^[A-Z][a-zñ]{4,6}$/;
-        check(result.seen.length > 0 && result.seen.every((word) => pattern.test(word)), `S9 ${grade}º level ${level + 1}: short unaccented content`);
+        const regular = result.seen.filter((word) => !swarmWords[5].includes(word));
+        check(regular.length > 0 && regular.every((word) => pattern.test(word)), `S9 ${grade}º level ${level + 1}: short unaccented content (${regular.join(" ")})`);
       }
-      if (grade === 6) check(result.seen.length > 0 && result.seen.every((t) => pools[6][level].includes(t)), `S1 6º level ${level + 1}: own harder content (${result.seen.join(" | ")})`);
+      if (grade === 6) check(result.seen.length > 0 && result.seen.every((t) => pools[6][level].includes(t) || swarmWords[6].includes(t)), `S1 6º level ${level + 1}: own harder content (${result.seen.join(" | ")})`);
       if (result.finished && await page.locator(".overlay").count()) await pressPlay(page);
     }
   }
@@ -833,8 +938,9 @@ async function arcadeContracts() {
   // every 6º level-3 entry must be an accented capital.
   const bareCapitals = pools[6][2].filter((t) => !/^[A-ZÁÉÍÓÚ]/.test(t) || !/[áéíóúÁÉÍÓÚ]/.test(t));
   check(bareCapitals.length === 0, `S1 6º level 3 list is made of accented capitals (missing accent: ${bareCapitals.join(" ") || "none"})`);
-  seen = await playLevel(page, 9, pools[6][2], "6º level 3");
-  check(seen.every((t) => /^[A-ZÁÉÍÓÚ]/.test(t) && /[áéíóúÁÉÍÓÚ]/.test(t)), `S1 6º level 3 ships carry accented capitals (${seen.join(" ")})`);
+  seen = await playLevel(page, 9, [...pools[6][2], ...swarmWords[6]], "6º level 3");
+  const capitals = seen.filter((t) => !swarmWords[6].includes(t));
+  check(capitals.length > 0 && capitals.every((t) => /^[A-ZÁÉÍÓÚ]/.test(t) && /[áéíóúÁÉÍÓÚ]/.test(t)), `S1 6º level 3 ships carry accented capitals (${capitals.join(" ")})`);
   seen = await playLevel(page, 12, pools[6][3], "6º level 4");
   check(seen.every((t) => t.includes(" ") && /[¿?¡!.,]/.test(t)), `S1 6º level 4 ships carry punctuated sentences (${seen.join(" | ")})`);
   text = await overlayText(page);
@@ -881,5 +987,6 @@ async function arcadeContracts() {
   await chromebookAccents();
   await errorHearts();
   await noTrapShips();
+  await swarmsAndLaser();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 })().catch((error) => { console.error(error); console.error(`TOTAL before error: ${okCount} ok, ${failCount} FAIL`); process.exit(1); });
