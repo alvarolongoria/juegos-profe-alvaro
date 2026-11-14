@@ -166,6 +166,14 @@ const pools = {
     "Pablo Marta Carmen Daniel Elena Samuel Teresa Madrid Sevilla Toledo Granada España".split(" "),
     ["El sol brilla", "Me gusta leer", "Hoy hace frío", "Mi perro corre", "La luna sale", "Vamos al parque", "Tengo un libro", "Juego con mis amigos", "Las flores huelen bien", "Comemos fruta", "Bebo agua fresca", "Nado en la piscina"],
   ],
+  // 6º has its own harder content: rare letters, long accented words,
+  // accented capitals and punctuated sentences.
+  6: [
+    "pingüino cigüeña kiwi koala wifi taxi examen boxeo llave lluvia yogur zigzag".split(" "),
+    "murciélago teléfono bolígrafo matemáticas helicóptero kilómetro frigorífico miércoles extraordinario electrodoméstico informática geografía".split(" "),
+    "Málaga Cádiz Córdoba Jaén León Ávila Lucía Martín Sofía Andrés Atlántico Pirineos".split(" "),
+    ["¿Qué hora es?", "¡Qué frío hace!", "El océano Atlántico es enorme.", "Mañana iré a Málaga.", "¿Dónde está mi lápiz?", "¡Bien hecho, Lucía!", "El pingüino nada rápido.", "Hoy, después de clase, jugamos.", "¿Cómo te llamas?", "¡Cuidado con el murciélago!", "La cigüeña vuela alto.", "Me encanta la música."],
+  ],
 };
 const demand = { 2: [4, 6, 8, 10], 3: [6, 8, 11, 14], 4: [8, 11, 14, 18], 5: [10, 14, 18, 24], 6: [12, 17, 23, 30] };
 // How much longer a ship takes to land than typing it needs at the target:
@@ -261,7 +269,7 @@ async function calibrationAndSpecials() {
     await page.reload();
     await chooseGrade(page, grade);
     for (let level = 0; level < 4; level++) {
-      const pool = pools[grade === 4 ? 3 : grade === 6 ? 5 : grade][level];
+      const pool = pools[grade === 4 ? 3 : grade][level];
       const expected = pool.reduce((n, word) => n + word.length, 0) / pool.length * 12 / demand[grade][level];
       console.log(`calibration ${grade}º level ${level + 1}: interval ${expected.toFixed(2)}s, fall ${(expected * slack[grade][level]).toFixed(2)}s`);
       const measured = await measureLevel(page);
@@ -270,10 +278,11 @@ async function calibrationAndSpecials() {
       check(!!measured && measured.initialCount === 1, `S9 ${grade}º level ${level + 1}: no double wave`);
       const result = await finishWithClock(page);
       check(result.finished, `S9 ${grade}º level ${level + 1}: finishes through keyboard`);
-      if (grade >= 5 && level < 3) {
+      if (grade === 5 && level < 3) {
         const pattern = level === 0 ? /^[a-zñ]{5,7}$/ : level === 1 ? /^(?=.{5,7}$)(?=.*(?:ñ|j|g|z|ll|rr))[a-zñ]+$/ : /^[A-Z][a-zñ]{4,6}$/;
         check(result.seen.length > 0 && result.seen.every((word) => pattern.test(word)), `S9 ${grade}º level ${level + 1}: short unaccented content`);
       }
+      if (grade === 6) check(result.seen.length > 0 && result.seen.every((t) => pools[6][level].includes(t)), `S1 6º level ${level + 1}: own harder content (${result.seen.join(" | ")})`);
       if (result.finished && await page.locator(".overlay").count()) await pressPlay(page);
     }
   }
@@ -745,8 +754,8 @@ async function arcadeContracts() {
   await chooseGrade(page, 6);
   check(await page.evaluate(() => localStorage.getItem("teclado-record-6")) === null, "no 6º record before playing");
   specialChars = 0;
-  seen = await playLevel(page, 5, null, "6º level 1");
-  check(seen.every((t) => /^[a-zñ]{5,7}$/.test(t)), `6º level 1 ships carry 5-7 unaccented lowercase letters (${seen.join(" ")})`);
+  seen = await playLevel(page, 5, pools[6][0], "6º level 1");
+  check(seen.every((t) => /ü|k|w|x|ll|y|z/.test(t)), `S1 6º level 1 ships carry rare letters (${seen.join(" ")})`);
   text = await page.locator('#stats').textContent();
   check(/\nPalabras\/min: \d+/.test(text), `6º live words per minute (${JSON.stringify(text)})`);
   // The speed record only starts after 10 s of play (a first-second burst is not a record).
@@ -754,10 +763,12 @@ async function arcadeContracts() {
   check(peak, `6º live speed record appears after 10 s (${JSON.stringify(await page.locator("#stats").textContent())})`);
   check(text.includes(`\nPrecisión: 100 %`), "6º live accuracy");
   check(/Racha: [1-9]\d*/.test(await page.locator('#streak').textContent()), '6º live streak');
-  await playLevel(page, 7, null, "6º level 2");
-  await playLevel(page, 9, null, "6º level 3");
-  seen = await playLevel(page, 12, null, "6º level 4");
-  check(seen.every((t) => t.includes(" ")), `6º level 4 ships carry short sentences (${seen.join(" | ")})`);
+  seen = await playLevel(page, 7, pools[6][1], "6º level 2");
+  check(seen.every((t) => t.length >= 8), `S1 6º level 2 ships carry long words (${seen.join(" ")})`);
+  seen = await playLevel(page, 9, pools[6][2], "6º level 3");
+  check(seen.every((t) => /^[A-ZÁÉÍÓÚ]/.test(t) && /[áéíóúÁÉÍÓÚ]/.test(t)), `S1 6º level 3 ships carry accented capitals (${seen.join(" ")})`);
+  seen = await playLevel(page, 12, pools[6][3], "6º level 4");
+  check(seen.every((t) => t.includes(" ") && /[¿?¡!.,]/.test(t)), `S1 6º level 4 ships carry punctuated sentences (${seen.join(" | ")})`);
   text = await overlayText(page);
   check(/\nPalabras por minuto: \d+/.test(text) && /\nRacha más larga: \d+/.test(text), '6º final summary shows WPM and best streak');
   check(text.includes('\nPrecisión: 100 %'), '6º final summary shows accuracy');

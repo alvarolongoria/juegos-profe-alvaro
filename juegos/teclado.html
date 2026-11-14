@@ -111,7 +111,15 @@
       };
       // Neighbouring grades share content but have their own typing targets.
       GRADES[4] = { ...GRADES[3], wpm: [8, 11, 14, 18] };
-      GRADES[6] = { ...GRADES[5], wpm: [12, 17, 23, 30] };
+      // 6º gets its own harder content at the same typing targets: rare letters,
+      // long accented words, accented capitals and punctuated sentences.
+      GRADES[6] = { wpm: [12, 17, 23, 30], levels: [
+        words("pingüino cigüeña kiwi koala wifi taxi examen boxeo llave lluvia yogur zigzag"),
+        words("murciélago teléfono bolígrafo matemáticas helicóptero kilómetro frigorífico miércoles extraordinario electrodoméstico informática geografía"),
+        words("Málaga Cádiz Córdoba Jaén León Ávila Lucía Martín Sofía Andrés Atlántico Pirineos"),
+        ["¿Qué hora es?", "¡Qué frío hace!", "El océano Atlántico es enorme.", "Mañana iré a Málaga.", "¿Dónde está mi lápiz?", "¡Bien hecho, Lucía!",
+          "El pingüino nada rápido.", "Hoy, después de clase, jugamos.", "¿Cómo te llamas?", "¡Cuidado con el murciélago!", "La cigüeña vuela alto.", "Me encanta la música."],
+      ] };
       const GOALS = [5, 7, 9, 12];
       // How much longer a ship takes to land than typing its text at the level
       // target. It shrinks level by level so every step feels harder, and it
