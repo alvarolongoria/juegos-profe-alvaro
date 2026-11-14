@@ -20,6 +20,10 @@
       /* A two-line warning needs longer than a plain level number. */
       #level-banner.warn { font-size: clamp(26px, 3.4vw, 44px); }
       #level-banner.warn.show { animation-duration: 3.5s; }
+      /* S9: the laser ship announces itself before its tricky phrase lands. */
+      #laser-warning { position: fixed; top: 22%; left: 50%; transform: translate(-50%, -50%); z-index: 46; padding: 4px 22px; border: 4px solid #fb7d83; border-radius: 18px; background: #2b1020ee; color: #fff7e4; font-size: clamp(24px, 3vw, 40px); font-weight: bold; text-shadow: 0 0 12px #fb7d83; opacity: 0; pointer-events: none; }
+      #laser-warning.show { animation: laser-warning 1.6s ease-out forwards; }
+      @keyframes laser-warning { 0% { opacity: 0; } 15%, 70% { opacity: 1; } 100% { opacity: 0; } }
       #shield { position: fixed; left: 20%; bottom: 10px; width: 60%; height: 19px; z-index: 20; overflow: hidden; border: 3px solid #9fe3f0; border-radius: 20px; background: #142341; box-shadow: 0 0 12px #55cbd1; }
       #shield-fill { height: 100%; width: 100%; background: #22c55e; transition: width .25s, background .25s; }
       #shield[data-state="warning"] #shield-fill { background: #f59e0b; }
@@ -27,8 +31,9 @@
       .ship { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; will-change: transform; }
       .ship svg { width: 74px; height: 56px; animation: hover 1.2s ease-in-out infinite; }
       .ship[data-kind="mother"] svg { width: 120px; height: 80px; filter: drop-shadow(0 0 9px #efaa63); }
-      /* The laser ship is bigger and glows, so it reads as a threat at a glance. */
-      .ship[data-kind="laser"] svg { width: 106px; height: 80px; filter: drop-shadow(0 0 14px #fb7d83); }
+      /* The laser ship is much bigger and has its own drawing, so it reads as a
+         different kind of threat at a glance (S9). */
+      .ship[data-kind="laser"] svg { width: 150px; height: 112px; filter: drop-shadow(0 0 16px #fb7d83); }
       .ship[data-kind="laser"] .label { border-color: #b45309; background: #ffe9b0; box-shadow: 0 0 16px 5px #ffcc5899; }
       .ship[data-kind="child"] svg { width: 52px; height: 40px; }
       .ship[data-kind="child"] .label { font-size: 25px; }
@@ -129,14 +134,31 @@
           "El pingüino nada rápido.", "Hoy, después de clase, jugamos.", "¿Cómo te llamas?", "¡Cuidado con el murciélago!", "La cigüeña vuela alto.", "Me encanta la música."],
       ] };
       const GOALS = [5, 7, 9, 12];
-      // S5 (D3): level 3 of 5º-6º sends waves of four short words, each with an
-      // accent or ü, from a list of its own per grade.
+      // S5 (D3) + S7 (D5): level 3 of 5º-6º sends staggered waves of three short
+      // words, each with an accent or ü, from a list of its own per grade.
       const SWARM = {
         5: words("mamá papá sofá café ratón avión limón jamón camión lápiz bebé menú melón árbol"),
         6: words("música lápiz cámara página física médico rápido débil fácil hélice"),
       };
-      const SWARM_SIZE = 4;
+      const SWARM_SIZE = 3;
+      const SWARM_STAGGER = 90; // each wave ship starts this much higher than the last
       const SWARM_GAP = 3; // normal ships between two waves
+      // S8 (D6/D7): objects whose effect acts on the other ships on screen.
+      const SHIP_EFFECTS = ["bomb", "ice"];
+      // S9: the laser ship carries its own tricky phrases, with accents, ü, ñ and
+      // signs. They are short in level 3 and long in level 4, like that level's
+      // normal content, so the typing pace of the level does not change.
+      const LASER_LINES = {
+        5: {
+          short: ["¿Piñata?", "Canción", "Cigüeña", "¡Pingüino!", "Música"],
+          long: ["¿Qué pingüino ganó?", "La cigüeña bailó.", "¿Añil o canción?", "Mañana, ¡piñata!", "Hoy toco la música."],
+        },
+        6: {
+          short: ["¿Pingüino?", "¡Cigüeña!", "Murciélago", "¿Añil?", "Kilómetro"],
+          long: ["¿Quién diseñó el pingüino?", "El murciélago huyó, Lucía.", "¿Frigorífico o lavavajillas?", "Extraordinario, ¡cigüeña!", "Hoy, ¿kilómetros o millas?"],
+        },
+      };
+      const laserLines = () => (level === 3 ? LASER_LINES[grade].long : LASER_LINES[grade].short);
       // How much longer a ship takes to land than typing its text at the level
       // target. It shrinks level by level so every step feels harder, and it
       // stays generous for the youngest grades; 1º raises its speed instead.
@@ -157,6 +179,8 @@
       };
       const SHIP_ART = '<path d="M37 4c-10 0-16 10-16 20h32c0-10-6-20-16-20z" fill="#9fe3f0"/><path d="M4 30q33-14 66 0l-8 14H12z" fill="#ad9df0"/><circle cx="22" cy="36" r="3" fill="#ffcc58"/><circle cx="37" cy="38" r="3" fill="#ffcc58"/><circle cx="52" cy="36" r="3" fill="#ffcc58"/><path d="M22 44l-4 9m34-9 4 9" fill="none"/>';
       const MOTHER_ART = '<path d="M20 25q3-19 17-20 14 1 17 20z" fill="#ffcc58"/><path d="M2 29q35-14 70 0L62 45H12z" fill="#efaa63"/><path d="M10 34h54M18 44l-6 8m44-8 6 8" fill="none"/><circle cx="24" cy="36" r="3" fill="#fff7e4"/><circle cx="37" cy="37" r="3" fill="#fff7e4"/><circle cx="50" cy="36" r="3" fill="#fff7e4"/>';
+      // S9: the laser ship has a drawing of its own, not a recoloured normal ship.
+      const LASER_ART = '<path d="M37 2 23 24h28z" fill="#ffcc58"/><path d="M7 24q30-11 60 0l-7 9H14z" fill="#e0404a"/><path d="M14 33h46l-9 13H23z" fill="#ad9df0"/><path d="M23 46 14 54m37-8 9 8" fill="none"/><circle cx="37" cy="39" r="5" fill="#fff7e4"/><circle cx="20" cy="29" r="2.5" fill="#9fe3f0"/><circle cx="54" cy="29" r="2.5" fill="#9fe3f0"/>';
 
       const sky = document.getElementById("sky");
       const shield = document.getElementById("shield");
@@ -164,6 +188,11 @@
       const streakBox = document.getElementById("streak");
       const levelBadge = document.getElementById("level-badge");
       const levelBanner = document.getElementById("level-banner");
+      // S9: a short warning whenever the laser ship appears.
+      const laserNotice = document.createElement("div");
+      laserNotice.id = "laser-warning";
+      laserNotice.textContent = "¡Nave láser!";
+      document.body.appendChild(laserNotice);
       const cannon = document.getElementById("cannon");
       const barrel = document.querySelector("#cannon .barrel");
       const trophies = Juegos.trophies(4);
@@ -184,6 +213,7 @@
       let shipsSinceSpecial = 0;
       let shipsSinceMother = 0;
       let shipsSinceLaser = 0;
+      let shipsSinceEffect = 0;
       let swarmGap = 0;
       let motherDebt = 0;
       let freezeRemaining = 0;
@@ -197,6 +227,9 @@
       // S5: swarms arrive in level 3 and the laser ship appears in levels 3-4.
       const swarmTurn = () => grade >= 5 && level === 2;
       const laserTurn = () => grade >= 5 && level >= 2;
+      // S8 (D7): a bomb or the ice wants two enemy ships on screen; a level that
+      // can never hold two at once would be content with one.
+      const minTargets = () => Math.min(2, grade === 1 ? config.max : 2);
       const isThreat = (ship) => ship.kind === "ship" || ship.kind === "laser" || ship.kind === "mother" || ship.kind === "child";
       const multiplier = () => stats.streak >= 20 ? 2 : stats.streak >= 10 ? 1.5 : 1;
       const currentSpeed = () => stats.correct / Math.max(1 / 60, (performance.now() - stats.start) / 60000);
@@ -239,8 +272,11 @@
         const mother = alive.find((s) => s.kind === "mother");
         let kind = "ship", text = "";
         if (forced) {
-          // spawnSwarm already chose the word; the rest of the spawn is shared.
-          ({ kind, text } = forced);
+          // A word chosen outside the normal slot (a swarm ship) or a special
+          // object whose moment has come (a bomb or the ice, S8).
+          kind = forced.kind;
+          text = forced.text ?? (grade === 1 ? Juegos.pick(letters) : SPECIALS[kind].text);
+          if (!text || (kind !== "ship" && grade >= 2 && taken.includes(text[0].toLowerCase()))) return null;
         } else if (mother) {
           kind = "child";
           // The sentence level launches short words, not another sentence.
@@ -251,6 +287,8 @@
           text = Juegos.pick(pool.filter((t) => t.length === shortest));
         } else if (shipsSinceSpecial >= 3 && !alive.some((s) => Object.hasOwn(SPECIALS, s.kind))) {
           const available = Object.keys(SPECIALS).filter((key) => {
+            // The bomb and the ice arrive on their own rule, never in this slot (S8).
+            if (SHIP_EFFECTS.includes(key)) return false;
             const word = SPECIALS[key].text;
             return grade === 1 || !word ? letters.length > 0 : !taken.includes(word[0]);
           });
@@ -281,8 +319,15 @@
           // S5 (D4): from level 3 the third ship is a laser ship. It keeps a
           // normal word and slot, but answers a wrong key with a laser.
           if (laserTurn() && ++shipsSinceLaser >= 3 && !alive.some((s) => s.kind === "laser")) {
-            kind = "laser";
-            shipsSinceLaser = 0;
+            // S9: its own tricky phrase, with a free initial so the first key
+            // still picks exactly one ship, and a short warning on arrival.
+            const laserPool = laserLines().filter((t) => !taken.includes(t[0].toLowerCase()));
+            if (laserPool.length) {
+              kind = "laser";
+              text = Juegos.pick(laserPool);
+              shipsSinceLaser = 0;
+              warnLaser();
+            }
           }
         }
         if (!forced && (kind === "ship" || kind === "child")) shipsSinceMother++;
@@ -292,13 +337,17 @@
         el.dataset.kind = kind;
         el.dataset.text = text;
         el.dataset.typed = "0";
-        const art = kind === "mother" ? MOTHER_ART : kind === "ship" || kind === "child" || kind === "laser" ? SHIP_ART : SPECIALS[kind].art;
+        const art = kind === "mother" ? MOTHER_ART : kind === "laser" ? LASER_ART : kind === "ship" || kind === "child" ? SHIP_ART : SPECIALS[kind].art;
         el.innerHTML = `<svg viewBox="0 0 74 56" aria-hidden="true"><g stroke="#142341" stroke-width="4" stroke-linejoin="round">${art}</g></svg>`;
         const label = document.createElement("div");
         label.className = "label";
         el.appendChild(label);
         sky.appendChild(el);
-        const ship = { el, label, text, kind, typed: 0, x: 0, y: kind === "child" ? mother.y : 90, dx: 0 };
+        // S7: each wave ship starts higher than the last, so they land one after
+        // another. S8: a bomb or the ice appears above the ships it acts on.
+        const topmost = Math.min(Infinity, ...alive.filter(isThreat).map((s) => s.y));
+        const startY = SHIP_EFFECTS.includes(kind) ? Math.min(topmost, 90) - 40 : forced?.y ?? (kind === "child" ? mother.y : 90);
+        const ship = { el, label, text, kind, typed: 0, x: 0, y: startY, dx: 0 };
         if (isThreat(ship) && freezeRemaining > 0) el.classList.add("frozen");
         drawLabel(ship);
         // Pick a spot away from the other ships, inside the screen.
@@ -328,13 +377,13 @@
         return ship;
       }
 
-      // A wave arrives together: four short accented words, each with a free
-      // initial so the first key still picks exactly one ship.
+      // A wave arrives together but staggered (S7): each ship starts higher than
+      // the previous one, so the words reach the ground one after another.
       function spawnSwarm(count) {
         for (let made = 0; made < count; made++) {
           const taken = alive.map((s) => s.text[0].toLowerCase());
           const pool = SWARM[grade].filter((t) => !taken.includes(t[0].toLowerCase()));
-          if (!pool.length || !spawnOne({ kind: "ship", text: Juegos.pick(pool) })) return;
+          if (!pool.length || !spawnOne({ kind: "ship", text: Juegos.pick(pool), y: 90 - made * SWARM_STAGGER })) return;
         }
       }
 
@@ -416,16 +465,20 @@
           const max = grade === 1 ? config.max : 2;
           const normalCount = alive.filter(isThreat).length;
           if (playing && (alive.length === 0 || untilSpawn <= 0)) {
-            // S5 (D3): every few ships, level 3 sends a wave of four short words
-            // and then waits longer, so the average speed of the level is kept.
+            // S5 (D3) + S7: level 3 sends a wave of three short words, which
+            // borrows the next two spawn slots, so the pause keeps the average.
             const swarmRoom = destroyed + normalCount + SWARM_SIZE <= GOALS[level];
             if (swarmTurn() && swarmGap >= SWARM_GAP && swarmRoom) {
               spawnSwarm(SWARM_SIZE);
               swarmGap = 0;
-              untilSpawn = interval * (SWARM_SIZE + 1);
+              untilSpawn = interval * SWARM_SIZE;
             } else {
-              const spawned = alive.length < max && destroyed + normalCount < GOALS[level] ? spawnOne() : null;
-              if (spawned) swarmGap++;
+              // Bonus objects do not consume a ship slot: only the enemy ships count.
+              const spawned = normalCount < max && destroyed + normalCount < GOALS[level] ? spawnOne() : null;
+              if (spawned) {
+                swarmGap++;
+                shipsSinceEffect++;
+              }
               if (grade >= 2 && spawned?.kind === "mother") {
                 // Split the mother's typing budget around its first launch. The
                 // second half is charged along with the child's own characters.
@@ -440,12 +493,27 @@
               }
             }
           }
+          // S8 (D7): the bomb and the ice join a screen that already holds two
+          // enemy ships, above them, so the player must look and choose them.
+          const busy = alive.filter(isThreat).length;
+          if (playing && shipsSinceEffect >= 3 && busy >= minTargets() && destroyed < GOALS[level]
+            && !alive.some((s) => Object.hasOwn(SPECIALS, s.kind))) {
+            if (spawnOne({ kind: Juegos.pick(SHIP_EFFECTS) })) shipsSinceEffect = 0;
+          }
           if (now - stats.lastPublished >= 1000) publish();
         }
         requestAnimationFrame(tick);
       }
 
-      let impactTimer, bannerTimer;
+      let impactTimer, bannerTimer, laserNoticeTimer;
+      function warnLaser() {
+        laserNotice.classList.remove("show");
+        void laserNotice.offsetWidth;
+        laserNotice.classList.add("show");
+        clearTimeout(laserNoticeTimer);
+        laserNoticeTimer = setTimeout(() => laserNotice.classList.remove("show"), 1600);
+      }
+
       function shakeShield() {
         cannon.classList.remove("impact");
         void cannon.offsetWidth;
@@ -494,6 +562,7 @@
         shipsSinceSpecial = 0;
         shipsSinceMother = 0;
         shipsSinceLaser = 0;
+        shipsSinceEffect = 0;
         swarmGap = 0;
         motherDebt = 0;
         freezeRemaining = 0;

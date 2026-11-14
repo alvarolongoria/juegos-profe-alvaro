@@ -164,9 +164,18 @@ async function noTrapShips() {
   }
 }
 
-// S5 (D3): level 3 of 5º and 6º sends waves of four short accented words and
-// announces them. S5 (D4): a bigger, glowing laser ship punishes a wrong key.
+// S5 (D3) + S7 (D5): level 3 of 5º and 6º sends staggered waves of three short
+// accented words and announces them. S5 (D4): a bigger, glowing laser ship
+// punishes a wrong key.
 async function swarmsAndLaser() {
+  // S9: the laser phrases are tricky (accent, ü or ñ plus signs) and 6º carries
+  // longer ones than 5º, so both keep the pace of their own level.
+  const average = (list) => list.reduce((n, t) => n + t.length, 0) / list.length;
+  for (const grade of [5, 6]) {
+    const lines = [...laserLines[grade].short, ...laserLines[grade].long];
+    check(lines.every((t) => /[áéíóúüñ]/i.test(t)) && lines.some((t) => /[¿?¡!.,]/.test(t)), `S9 ${grade}º laser phrases carry accents, ü, ñ and signs (${lines.join(" | ")})`);
+    if (grade === 6) check(["short", "long"].every((size) => average(laserLines[6][size]) > average(laserLines[5][size])), `S9 6º laser phrases are longer than 5º (${average(laserLines[6].short).toFixed(1)}/${average(laserLines[6].long).toFixed(1)} vs ${average(laserLines[5].short).toFixed(1)}/${average(laserLines[5].long).toFixed(1)})`);
+  }
   for (const grade of [5, 6, 4]) {
     const game = await openGame("juegos/teclado.html");
     const { page } = game;
@@ -183,7 +192,7 @@ async function swarmsAndLaser() {
     const seen = await page.evaluate(() => {
       const step = window.advanceFrames;
       const banner = document.querySelector("#level-banner");
-      const out = { announced: banner.textContent, warned: banner.classList.contains("warn"), waves: [], kinds: [], laser: null, maxLasers: 0 };
+      const out = { announced: banner.textContent, warned: banner.classList.contains("warn"), waves: [], kinds: [], laser: null, maxLasers: 0, shipArt: document.querySelector('.ship[data-kind="ship"] svg')?.innerHTML || "" };
       const known = new WeakSet(), kinds = new Set();
       for (let i = 0; i < 4000 && !out.laser && !document.querySelector(".overlay") && document.body.dataset.level === "2"; i++) {
         window.randomValue = ((i * 37) % 99 + 0.5) / 100;
@@ -193,10 +202,17 @@ async function swarmsAndLaser() {
         fresh.forEach((el) => known.add(el));
         ships.forEach((el) => kinds.add(el.dataset.kind));
         out.maxLasers = Math.max(out.maxLasers, document.querySelectorAll('.ship[data-kind="laser"]').length);
-        if (fresh.length > 3) out.waves.push(fresh.map((el) => el.dataset.text));
+        if (fresh.length > 2) out.waves.push(fresh.map((el) => ({ text: el.dataset.text, top: el.getBoundingClientRect().top })));
         const laser = document.querySelector('.ship[data-kind="laser"]');
         if (laser) {
-          out.laser = { text: laser.dataset.text, label: laser.getAttribute("aria-label"), width: laser.querySelector("svg").getBoundingClientRect().width };
+          const warning = document.querySelector("#laser-warning");
+          out.laser = {
+            text: laser.dataset.text,
+            label: laser.getAttribute("aria-label"),
+            width: laser.querySelector("svg").getBoundingClientRect().width,
+            art: laser.querySelector("svg").innerHTML,
+            warning: warning?.classList.contains("show") ? warning.textContent : "",
+          };
           break;
         }
         const low = ships.filter((el) => el.dataset.kind !== "laser").sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
@@ -213,9 +229,12 @@ async function swarmsAndLaser() {
     }
     check(/enjambres/i.test(seen.announced) && seen.warned, `S5 ${grade}º level 3 warns about the swarms (${JSON.stringify(seen.announced)})`);
     const wave = seen.waves[0] || [];
-    check(wave.length === 4 && wave.every((t) => t.length <= 6 && /[áéíóúü]/i.test(t) && swarmWords[grade].includes(t)), `S5 ${grade}º level 3 sends waves of four short accented words (${wave.join(" ")})`);
-    const big = !!seen.laser && /láser/i.test(seen.laser.label || "") && seen.laser.width > 90;
-    check(big && seen.maxLasers === 1, `S5 ${grade}º level 3 sends one big laser ship (${seen.laser?.text}, ${seen.laser?.width}px, ${seen.laser?.label})`);
+    check(wave.length === 3 && wave.every((w) => w.text.length <= 6 && /[áéíóúü]/i.test(w.text) && swarmWords[grade].includes(w.text)), `S5 ${grade}º level 3 sends waves of three short accented words (${wave.map((w) => w.text).join(" ")})`);
+    check(wave.length === 3 && wave.every((w, i) => i === 0 || wave[i - 1].top - w.top >= 30), `S7 ${grade}º the wave enters staggered, each ship higher than the last (${wave.map((w) => Math.round(w.top)).join(" > ")})`);
+    const big = !!seen.laser && /láser/i.test(seen.laser.label || "") && seen.laser.width >= 140 && seen.laser.art !== seen.shipArt;
+    check(big && seen.maxLasers === 1, `S5 ${grade}º level 3 sends one laser ship with its own bigger drawing (${seen.laser?.text}, ${seen.laser?.width}px, ${seen.laser?.label})`);
+    check(!!seen.laser && laserLines[grade].short.includes(seen.laser.text), `S9 ${grade}º the laser ship carries one of its own tricky phrases (${seen.laser?.text})`);
+    check(/Nave láser/i.test(seen.laser?.warning || ""), `S9 ${grade}º the laser ship warns when it arrives (${JSON.stringify(seen.laser?.warning)})`);
     // A wrong key inside a started laser word fires its laser and costs a heart.
     const probe = await page.evaluate(() => {
       const laser = document.querySelector('.ship[data-kind="laser"]');
@@ -245,19 +264,60 @@ async function swarmsAndLaser() {
     await finishWithClock(page);
     const late = await page.evaluate(() => {
       const step = window.advanceFrames;
-      const out = { found: false, max: 0, level: document.body.dataset.level };
+      const out = { found: false, max: 0, level: document.body.dataset.level, text: null, art: "" };
       for (let i = 0; i < 3000 && !out.found && !document.querySelector(".overlay") && document.body.dataset.level === "3"; i++) {
         window.randomValue = ((i * 37) % 99 + 0.5) / 100;
         step(50);
         const lasers = document.querySelectorAll('.ship[data-kind="laser"]');
         out.max = Math.max(out.max, lasers.length);
         out.found ||= lasers.length > 0;
+        if (lasers.length) { out.text = lasers[0].dataset.text; out.art = lasers[0].querySelector("svg").innerHTML; }
         const low = [...document.querySelectorAll(".ship")].filter((el) => el.dataset.kind !== "laser").sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
         if (low && low.getBoundingClientRect().bottom > innerHeight - 170) for (const key of low.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
       }
       return out;
     });
-    check(late.level === "3" && late.found && late.max === 1, `S5 ${grade}º level 4 also sends the laser ship, one at a time`);
+    check(late.level === "3" && late.found && late.max === 1 && laserLines[grade].long.includes(late.text) && late.art === seen.laser?.art, `S9 ${grade}º level 4 sends the laser ship with its longer tricky phrase and the same drawing (${late.text})`);
+    if (await page.locator(".overlay").count()) await pressPlay(page);
+    await finish(game);
+  }
+}
+
+// S8 (D6): an object whose effect acts on other ships (bomb, ice) only appears
+// once a ship is on screen, and always above it.
+async function effectObjects() {
+  const enemies = '.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"], .ship[data-kind="laser"]';
+  const effects = '.ship[data-kind="bomb"], .ship[data-kind="ice"]';
+  // 0.51 picks the bomb and 0.26 the ice, both of which act on other ships.
+  for (const [grade, seed] of [[1, 0.51], [3, 0.51], [6, 0.51], [6, 0.26]]) {
+    const game = await openGame("juegos/teclado.html");
+    const { page } = game;
+    await page.setViewportSize({ width: 1516, height: 694 });
+    await installFrameClock(page);
+    await chooseGrade(page, grade);
+    const seen = await page.evaluate(({ enemies, effects, seed }) => {
+      const step = window.advanceFrames;
+      window.randomValue = seed;
+      const known = new WeakSet(), spawns = [];
+      for (let i = 0; i < 900 && !document.querySelector(".overlay"); i++) {
+        step(50);
+        const fresh = [...document.querySelectorAll(".ship")].filter((el) => !known.has(el));
+        fresh.forEach((el) => known.add(el));
+        // Read the screen before typing anything this frame.
+        const tops = [...document.querySelectorAll(enemies)].map((el) => el.getBoundingClientRect().top);
+        for (const el of fresh.filter((e) => e.matches(effects))) {
+          spawns.push({ kind: el.dataset.kind, enemies: tops.length, above: tops.length > 0 && el.getBoundingClientRect().top < Math.min(...tops) });
+        }
+        // Empty the sky for the first frames, as a fast player would, then stop
+        // so some ships are on screen when the next special objects arrive.
+        const target = i < 8 && document.querySelector(enemies);
+        if (target) for (const key of target.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      }
+      return spawns;
+    }, { enemies, effects, seed });
+    const alone = seen.filter((s) => s.enemies === 0);
+    check(alone.length === 0, `S8 ${grade}º no ${alone.map((s) => s.kind).join("/") || "bomb or ice"} appears on an empty screen`);
+    check(seen.length > 0 && seen.every((s) => s.enemies >= 2 && s.above), `S8 ${grade}º every bomb or ice appears above two ships already on screen (${seen.map((s) => `${s.kind} above ${s.enemies}`).join(", ") || "none"})`);
     if (await page.locator(".overlay").count()) await pressPlay(page);
     await finish(game);
   }
@@ -344,6 +404,18 @@ const swarmWords = {
   5: "mamá papá sofá café ratón avión limón jamón camión lápiz bebé menú melón árbol".split(" "),
   6: "música lápiz cámara página física médico rápido débil fácil hélice".split(" "),
 };
+// S9: the tricky phrases the laser ship carries, short for level 3 and long for
+// level 4, so each keeps the length of that level's normal phrases.
+const laserLines = {
+  5: {
+    short: ["¿Piñata?", "Canción", "Cigüeña", "¡Pingüino!", "Música"],
+    long: ["¿Qué pingüino ganó?", "La cigüeña bailó.", "¿Añil o canción?", "Mañana, ¡piñata!", "Hoy toco la música."],
+  },
+  6: {
+    short: ["¿Pingüino?", "¡Cigüeña!", "Murciélago", "¿Añil?", "Kilómetro"],
+    long: ["¿Quién diseñó el pingüino?", "El murciélago huyó, Lucía.", "¿Frigorífico o lavavajillas?", "Extraordinario, ¡cigüeña!", "Hoy, ¿kilómetros o millas?"],
+  },
+};
 // How much longer a ship takes to land than typing it needs at the target:
 // it shrinks level by level and stays generous for the youngest grades.
 const slack = { 2: [2, 1.9, 1.75, 1.6], 3: [2, 1.8, 1.6, 1.45], 4: [2, 1.75, 1.55, 1.4], 5: [2, 1.7, 1.45, 1.35], 6: [2, 1.7, 1.45, 1.3] };
@@ -384,10 +456,10 @@ async function finishWithClock(page) {
   });
 }
 
-async function probeSpecial(page, random, grade = 2, hurt = false) {
+async function probeSpecial(page, random, grade = 2, hurt = false, want = null) {
   await page.reload();
   await chooseGrade(page, grade);
-  return page.evaluate(({ random, hurt }) => {
+  return page.evaluate(({ random, hurt, want }) => {
     window.randomValue = random;
     const step = window.advanceFrames;
     const type = (el) => { for (const key of el.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); };
@@ -398,15 +470,18 @@ async function probeSpecial(page, random, grade = 2, hurt = false) {
       for (let i = 0; i < 1600 && document.body.dataset.hearts === "3"; i++) step(50);
     }
     for (let i = 0; i < 2000; i++) {
-      const special = document.querySelector('.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="meteor"]');
+      const special = document.querySelector(want ? `.ship[data-kind="${want}"]` : '.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="meteor"]');
       if (special) return { kind: special.dataset.kind, text: special.dataset.text, firstKind, hearts: document.body.dataset.hearts };
-      const normal = document.querySelector('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]');
-      if (normal) type(normal);
+      // Type a ship only when it is about to land: two ships must be able to
+      // share the sky, or the bomb and the ice never arrive (S8).
+      const normal = [...document.querySelectorAll('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]')]
+        .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
+      if (normal && normal.getBoundingClientRect().bottom > innerHeight - 170) type(normal);
       if (document.querySelector(".overlay")) break;
       step(50);
     }
     return { kind: null, firstKind, hearts: document.body.dataset.hearts };
-  }, { random, hurt });
+  }, { random, hurt, want });
 }
 
 async function calibrationAndSpecials() {
@@ -464,8 +539,10 @@ async function calibrationAndSpecials() {
 
   await page.setViewportSize({ width: 1516, height: 694 });
   const found = {};
-  for (const random of [0.01, 0.26, 0.51, 0.76]) {
-    const probe = await probeSpecial(page, random);
+  // Each seed drives one object: the heart and the meteor from the normal slot,
+  // the bomb and the ice from the two-ship rule (S8), which has its own pick.
+  for (const [want, random] of [["heart", 0.01], ["bomb", 0.26], ["ice", 0.51], ["meteor", 0.76]]) {
+    const probe = await probeSpecial(page, random, 2, false, want);
     if (probe.kind) found[probe.kind] = random;
     check(probe.firstKind === "ship", `S10 no special as first ship (${random})`);
   }
@@ -473,9 +550,9 @@ async function calibrationAndSpecials() {
 
   for (const kind of ["heart", "ice", "bomb", "meteor"]) {
     if (!(kind in found)) continue;
-    const probe1 = await probeSpecial(page, found[kind], 1);
+    const probe1 = await probeSpecial(page, found[kind], 1, false, kind);
     check(probe1.kind === kind && /^[a-z]$/.test(probe1.text), `S10 ${kind}: 1º carries one letter`);
-    const probe2 = await probeSpecial(page, found[kind]);
+    const probe2 = await probeSpecial(page, found[kind], 2, false, kind);
     const expected = { heart: "vida", ice: "hielo", bomb: "bomba" }[kind];
     check(probe2.kind === kind && (kind === "meteor" ? /^[a-z]$/.test(probe2.text) : probe2.text === expected), `S10 ${kind}: 2º uses the expected text`);
     const svg = await page.locator(`.ship[data-kind="${kind}"] svg`).count();
@@ -483,6 +560,10 @@ async function calibrationAndSpecials() {
     const landed = await page.evaluate((kind) => {
       const el = document.querySelector(`.ship[data-kind="${kind}"]`);
       const before = document.body.dataset.hearts;
+      // Clear the enemy ships first, so only the object itself can cost a heart.
+      for (const threat of [...document.querySelectorAll('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]')]) {
+        for (const key of threat.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      }
       for (let i = 0; i < 800 && el.isConnected; i++) window.advanceFrames(50);
       return !el.isConnected && document.body.dataset.hearts === before;
     }, kind);
@@ -495,7 +576,7 @@ async function calibrationAndSpecials() {
     if (!(kind in found)) continue;
     // Pick the middle of the same random bucket to keep the subject away from
     // the screen edge; let the previous shots' particles finish naturally.
-    await probeSpecial(page, (Math.floor(found[kind] * 4) + 0.5) / 4, 5);
+    await probeSpecial(page, (Math.floor(found[kind] * 4) + 0.5) / 4, 5, false, kind);
     await page.waitForTimeout(1100);
     const png = await page.screenshot();
     const preview = await page.evaluate(async ({ base64, kind }) => {
@@ -532,7 +613,7 @@ async function calibrationAndSpecials() {
   }
 
   if ("heart" in found) {
-    await probeSpecial(page, found.heart);
+    await probeSpecial(page, found.heart, 2, false, "heart");
     const bonus = await page.evaluate(() => {
       const before = Number(document.querySelector("#stats").textContent.match(/\d+/)[0]);
       const el = document.querySelector('.ship[data-kind="heart"]');
@@ -540,7 +621,7 @@ async function calibrationAndSpecials() {
       return { hearts: document.body.dataset.hearts, delta: Number(document.querySelector("#stats").textContent.match(/\d+/)[0]) - before };
     });
     check(bonus.hearts === "3" && bonus.delta > 40, "S10 heart at full health gives bonus points without exceeding three");
-    await probeSpecial(page, found.heart, 2, true);
+    await probeSpecial(page, found.heart, 2, true, "heart");
     const healing = await page.evaluate(() => {
       const before = document.body.dataset.hearts, el = document.querySelector('.ship[data-kind="heart"]');
       if (el) for (const key of el.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
@@ -553,7 +634,7 @@ async function calibrationAndSpecials() {
 
   for (const kind of ["ice", "bomb"]) {
     if (!(kind in found)) { check(false, `S10 ${kind}: effect on ordinary ships`); continue; }
-    await probeSpecial(page, found[kind]);
+    await probeSpecial(page, found[kind], 2, false, kind);
     const effect = await page.evaluate((kind) => {
       const step = window.advanceFrames;
       for (let i = 0; i < 400 && !document.querySelector('.ship[data-kind="ship"]'); i++) step(50);
@@ -561,10 +642,11 @@ async function calibrationAndSpecials() {
       const normal = document.querySelector('.ship[data-kind="ship"]');
       if (!special || !normal) return null;
       const starts = [...document.querySelectorAll(".ship")].map((el) => el.dataset.text[0].toLowerCase());
-      const maxSpecials = document.querySelectorAll('.ship[data-kind]:not([data-kind="ship"])').length;
+      const maxSpecials = document.querySelectorAll('.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="meteor"]').length;
+      const threats = [...document.querySelectorAll('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]')].length;
       const before = document.querySelectorAll(".progress span.on").length;
       for (const key of special.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
-      if (kind === "bomb") return { starts, maxSpecials, gone: !normal.isConnected, gained: document.querySelectorAll(".progress span.on").length - before };
+      if (kind === "bomb") return { starts, maxSpecials, threats, gone: threats > 0 && !document.querySelector('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]'), gained: document.querySelectorAll(".progress span.on").length - before };
       const top = normal.getBoundingClientRect().top;
       const frozenLook = getComputedStyle(normal).filter !== "none" || normal.classList.contains("frozen");
       step(4500);
@@ -573,11 +655,11 @@ async function calibrationAndSpecials() {
       return { starts, maxSpecials, frozenLook, still: Math.abs(still - top) < 0.1, resumed: normal.getBoundingClientRect().top > still };
     }, kind);
     check(!!effect && new Set(effect.starts).size === effect.starts.length && effect.maxSpecials === 1, `S10 ${kind}: unique first letters and at most one special`);
-    check(!!effect && (kind === "bomb" ? effect.gone && effect.gained === 1 : effect.frozenLook && effect.still && effect.resumed), `S10 ${kind}: effect on ordinary ships`);
+    check(!!effect && (kind === "bomb" ? effect.gone && effect.gained === effect.threats : effect.frozenLook && effect.still && effect.resumed), `S10 ${kind}: effect on ordinary ships`);
   }
 
   if ("meteor" in found) {
-    await probeSpecial(page, found.meteor);
+    await probeSpecial(page, found.meteor, 2, false, "meteor");
     const meteor = await page.evaluate(() => {
       const el = document.querySelector('.ship[data-kind="meteor"]');
       const start = el.getBoundingClientRect();
@@ -588,7 +670,7 @@ async function calibrationAndSpecials() {
       return { dx: next.left - start.left, dy: next.top - start.top, landed: !el.isConnected, hearts, after: document.body.dataset.hearts };
     });
     check(Math.abs(meteor.dx) > 5 && meteor.dy > 50 && meteor.landed && meteor.hearts === meteor.after, "S10 meteor falls fast diagonally and landing costs no heart");
-    await probeSpecial(page, found.meteor);
+    await probeSpecial(page, found.meteor, 2, false, "meteor");
     const bonus = await page.evaluate(() => {
       const before = Number(document.querySelector("#stats").textContent.match(/\d+/)[0]);
       const el = document.querySelector('.ship[data-kind="meteor"]');
@@ -604,17 +686,19 @@ async function calibrationAndSpecials() {
 async function virtualTypists() {
   const game = await openGame('juegos/teclado.html');
   const { page } = game;
+  const threat = '.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]';
   await page.setViewportSize({ width: 1516, height: 694 });
   await installFrameClock(page);
   for (const random of [0.01, 0.13, 0.26, 0.39, 0.51, 0.64, 0.76, 0.89]) {
     await page.reload();
     await chooseGrade(page, 5);
-    const result = await page.evaluate((random) => {
+    const result = await page.evaluate(({ random, threat }) => {
       window.randomValue = random;
       let elapsed = 0;
       const trace = [];
       while (elapsed < 85000 && document.body.dataset.hearts === '3' && document.body.dataset.level === '0') {
-        let list = [...document.querySelectorAll('.ship')];
+        // A careful typist types the ships that can hurt, never the bonus objects.
+        let list = [...document.querySelectorAll(threat)];
         if (!list.length) { window.advanceFrames(50); elapsed += 50; continue; }
         list.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top);
         const target = list[0], text = target.dataset.text;
@@ -627,7 +711,7 @@ async function virtualTypists() {
         }
       }
       return { hearts: document.body.dataset.hearts, level: document.body.dataset.level, trace };
-    }, random);
+    }, { random, threat });
     check(result.hearts === '3' && result.level === '1', `S9 5º 10 WPM virtual typist seed ${random}${result.hearts !== '3' ? ` (${result.trace.join(', ')})` : ''}`);
   }
   await game.browser.close();
@@ -640,8 +724,8 @@ async function realTypist() {
   await chooseGrade(page, 5);
   const deadline = Date.now() + 85000;
   while (Date.now() < deadline && await data(page, "hearts") === "3" && await data(page, "level") === "0" && !await page.locator(".overlay").count()) {
-    await page.waitForSelector(".ship", { timeout: 3000 });
-    const text = await page.$$eval(".ship", (list) => list.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0].dataset.text);
+    await page.waitForSelector(normalShip, { timeout: 3000 });
+    const text = await page.$$eval(normalShip, (list) => list.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0].dataset.text);
     for (const ch of text) {
       await typeChar(page, ch);
       await page.waitForTimeout(1200); // 50 characters/minute = 10 WPM
@@ -988,5 +1072,6 @@ async function arcadeContracts() {
   await errorHearts();
   await noTrapShips();
   await swarmsAndLaser();
+  await effectObjects();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 })().catch((error) => { console.error(error); console.error(`TOTAL before error: ${okCount} ok, ${failCount} FAIL`); process.exit(1); });
