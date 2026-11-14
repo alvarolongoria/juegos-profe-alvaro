@@ -128,52 +128,37 @@ async function errorHearts() {
   }
 }
 
-// S3: from level 2 in 5º and 6º, red trap ships must not be typed.
-async function trapShips() {
-  const trap = '.ship[data-kind="trap"]';
-  // 4º never gets traps, and 5º-6º never get them in level 1.
-  for (const [grade, level, goal] of [[4, 2, 7], [5, 1, 5], [6, 1, 5]]) {
-    const game = await openGame("juegos/teclado.html");
-    const { page } = game;
-    await chooseGrade(page, grade);
-    if (level === 2) await playLevel(page, 5, null, `${grade}º level 1`);
-    let traps = 0;
-    for (let i = 0; i < goal; i++) {
-      traps += await page.locator(trap).count();
-      await typeText(page, await nextShip(page));
-    }
-    check(traps === 0, `S3 ${grade}º level ${level} has no trap ships`);
-    await finish(game);
-  }
+// S4: the red trap ships are gone. Levels 2-4 in 5º and 6º only send ships
+// that are meant to be typed, and no banner warns about red ships any more.
+async function noTrapShips() {
   for (const grade of [5, 6]) {
     const game = await openGame("juegos/teclado.html");
     const { page } = game;
+    await page.setViewportSize({ width: 1516, height: 694 });
+    await installFrameClock(page);
     await chooseGrade(page, grade);
-    await playLevel(page, 5, null, `${grade}º level 1`);
-    // Keep shooting normal ships until a trap shows up in level 2.
-    let found = null;
-    for (let i = 0; i < 200 && !found; i++) {
-      if (await page.locator(trap).count()) found = await page.locator(trap).first().getAttribute("data-text");
-      else if (await page.locator(normalShip).count()) await typeText(page, await nextShip(page));
-      else await page.waitForTimeout(100);
-    }
-    check(!!found && await data(page, "level") === "1", `S3 ${grade}º level 2 sends a trap ship (${found})`);
-    if (!found) { await finish(game); continue; }
-    const label = await page.locator(trap).first().getAttribute("aria-label");
-    check(/trampa/i.test(label || ""), `S3 ${grade}º the trap is announced as a trap (${label})`);
-    if (grade === 5) {
-      // Never typed, the trap reaches the ground and costs nothing.
-      for (let i = 0; i < 600 && await page.locator(trap).count() && await data(page, "level") === "1"; i++) {
-        if (await page.locator(normalShip).count()) await typeText(page, await nextShip(page));
-        else await page.waitForTimeout(100);
-      }
-      check(await page.locator(trap).count() === 0 && await data(page, "level") === "1" && await data(page, "hearts") === "3", `S3 5º a trap that lands costs nothing`);
-    } else {
-      const before = await score(page);
-      await typeChar(page, found[0]);
-      check(await data(page, "hearts") === "2", `S3 6º shooting the trap "${found}" costs a heart`);
-      check(await page.locator(trap).count() === 0, "S3 6º the shot trap disappears");
-      check(await score(page) === before, "S3 6º a shot trap does not count as a destroyed ship");
+    for (let index = 0; index < 4; index++) {
+      // Play the whole level on the frame clock, remembering every kind of
+      // object that showed up and what the level banner announced.
+      const seen = await page.evaluate(() => {
+        const banner = document.querySelector("#level-banner");
+        const start = document.body.dataset.level;
+        const announced = { text: banner.textContent, warned: banner.classList.contains("warn") };
+        const kinds = new Set();
+        let frame = 0;
+        for (; frame < 4000 && !document.querySelector(".overlay") && document.body.dataset.level === start; frame++) {
+          window.randomValue = ((frame * 37) % 99 + 0.5) / 100;
+          window.advanceFrames(50);
+          for (const el of document.querySelectorAll(".ship")) kinds.add(el.dataset.kind);
+          const target = document.querySelector(".ship");
+          if (target) for (const key of target.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+        }
+        const over = !!document.querySelector(".overlay") || document.body.dataset.level !== start;
+        return { level: start, announced, kinds: [...kinds], over };
+      });
+      check(seen.level === String(index) && seen.over && !seen.kinds.includes("trap"), `S4 ${grade}º level ${index + 1} sends only ships meant to be typed (${seen.kinds.join(" ") || "none"})`);
+      if (index > 0) check(!/roja/i.test(seen.announced.text) && !seen.announced.warned, `S4 ${grade}º level ${index + 1} banner only announces the level (${JSON.stringify(seen.announced.text)})`);
+      if (await page.locator(".overlay").count()) await pressPlay(page);
     }
     await finish(game);
   }
@@ -250,7 +235,7 @@ const pools = {
   6: [
     "pingüino cigüeña kiwi koala wifi taxi examen boxeo llave lluvia yogur zigzag".split(" "),
     "murciélago teléfono bolígrafo matemáticas helicóptero kilómetro frigorífico miércoles extraordinario electrodoméstico informática geografía".split(" "),
-    "Málaga Cádiz Córdoba Jaén León Ávila Lucía Martín Sofía Andrés Atlántico Pirineos".split(" "),
+    "Málaga Cádiz Córdoba Jaén León Ávila Lucía Martín Sofía Andrés Atlántico Almería".split(" "),
     ["¿Qué hora es?", "¡Qué frío hace!", "El océano Atlántico es enorme.", "Mañana iré a Málaga.", "¿Dónde está mi lápiz?", "¡Bien hecho, Lucía!", "El pingüino nada rápido.", "Hoy, después de clase, jugamos.", "¿Cómo te llamas?", "¡Cuidado con el murciélago!", "La cigüeña vuela alto.", "Me encanta la música."],
   ],
 };
@@ -286,8 +271,7 @@ async function finishWithClock(page) {
     for (let i = 0; i < 1000 && !document.querySelector(".overlay") && document.body.dataset.level === level; i++) {
       window.randomValue = ((i * 37) % 99 + 0.5) / 100;
       window.advanceFrames(50);
-      // A careful typist never shoots a red trap ship.
-      const target = document.querySelector('.ship:not([data-kind="trap"])');
+      const target = document.querySelector(".ship");
       if (!target) continue;
       if (!target.dataset.kind || target.dataset.kind === "ship") seen.push(target.dataset.text);
       for (const key of target.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
@@ -845,6 +829,10 @@ async function arcadeContracts() {
   check(/Racha: [1-9]\d*/.test(await page.locator('#streak').textContent()), '6º live streak');
   seen = await playLevel(page, 7, pools[6][1], "6º level 2");
   check(seen.every((t) => t.length >= 8), `S1 6º level 2 ships carry long words (${seen.join(" ")})`);
+  // Checked before playing so the whole list counts, not just the words drawn:
+  // every 6º level-3 entry must be an accented capital.
+  const bareCapitals = pools[6][2].filter((t) => !/^[A-ZÁÉÍÓÚ]/.test(t) || !/[áéíóúÁÉÍÓÚ]/.test(t));
+  check(bareCapitals.length === 0, `S1 6º level 3 list is made of accented capitals (missing accent: ${bareCapitals.join(" ") || "none"})`);
   seen = await playLevel(page, 9, pools[6][2], "6º level 3");
   check(seen.every((t) => /^[A-ZÁÉÍÓÚ]/.test(t) && /[áéíóúÁÉÍÓÚ]/.test(t)), `S1 6º level 3 ships carry accented capitals (${seen.join(" ")})`);
   seen = await playLevel(page, 12, pools[6][3], "6º level 4");
@@ -892,6 +880,6 @@ async function arcadeContracts() {
   await liveStatsStart();
   await chromebookAccents();
   await errorHearts();
-  await trapShips();
+  await noTrapShips();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 })().catch((error) => { console.error(error); console.error(`TOTAL before error: ${okCount} ok, ${failCount} FAIL`); process.exit(1); });
