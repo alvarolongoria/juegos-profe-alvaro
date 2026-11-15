@@ -170,6 +170,58 @@ async function keydownPlusInput() {
   await close(game, "tablet keydown plus input");
 }
 
+// T6 (S5): an Android keyboard with predictions (Samsung Keyboard, Gboard) sends
+// every letter as a composition that only ends when something else ends it, and
+// the child's next tap is what ended it ("si escribo la letra ... tengo después
+// que tocar en cualquier parte de la pantalla"). Each letter must reach the game
+// as soon as it is written, with no double typing when the composition ends.
+async function androidCompositionLetters() {
+  const game = await openGame("juegos/teclado.html");
+  const { page } = game;
+  await tapGrade(page, 5); // the level with the long words and the laser ship
+  await tapGame(page); // the tablet keyboard is open
+  const ship = await page.locator(normalShips).first();
+  await ship.waitFor();
+  const text = await ship.getAttribute("data-text");
+  const handle = await ship.elementHandle();
+  const before = await countedNow(page);
+
+  // Samsung Keyboard: compositionstart, then the field's value grows letter by
+  // letter while isComposing stays true. No compositionend arrives.
+  await page.evaluate(() => {
+    document.querySelector(".key-catcher").dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+  });
+  for (let letter = 1; letter <= text.length; letter++) {
+    const value = text.slice(0, letter);
+    await page.evaluate((value) => {
+      const catcher = document.querySelector(".key-catcher");
+      catcher.value = value;
+      catcher.dispatchEvent(new InputEvent("input", {
+        bubbles: true, data: value.slice(-1), inputType: "insertCompositionText", isComposing: true,
+      }));
+    }, value);
+    await page.waitForTimeout(60);
+    const typed = letter < text.length ? await handle.getAttribute("data-typed")
+      : (await gone(handle) ? "destroyed" : "still flying");
+    check(typed === String(letter) || (letter === text.length && typed === "destroyed"),
+      `tablet T6 Android: letter ${letter} of "${text}" is typed without tapping the screen (typed ${typed})`);
+  }
+  check(await gone(handle), `tablet T6 Android: typing "${text}" through the composition destroys its ship`);
+  check(await countsOnce(page, before), `tablet T6 Android: the ship destroyed while composing counts exactly once (from ${before.count})`);
+
+  // The composition ends when the child finally taps: nothing is typed again.
+  await page.evaluate(() => {
+    const catcher = document.querySelector(".key-catcher");
+    catcher.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: catcher.value }));
+    catcher.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", isComposing: false }));
+  });
+  await page.waitForTimeout(200);
+  const after = await countedNow(page);
+  check(after.level === before.level && after.count === before.count + 1,
+    `tablet T6 Android: ending the composition types nothing a second time (${before.count} -> ${after.count})`);
+  await close(game, "tablet android composition");
+}
+
 // S2: accented letters and ñ arrive through the composition/input path.
 // The target is one specific ship element, so a second ship carrying the same
 // word (or a word spawn of the same pool) can never make the check pass or fail.
@@ -310,13 +362,192 @@ async function desktopUnchanged() {
   await close(game, "desktop");
 }
 
+// S5 (T6): the ground is the cannon's top edge, and every ship starts on the
+// same line (y = 90) before flying down to that ground.
+const SPAWN_TOP = 90;
+
+const playState = (page) => page.evaluate(() => {
+  const ground = document.querySelector("#cannon").getBoundingClientRect().top;
+  return {
+    ground,
+    hearts: document.body.dataset.hearts,
+    level: document.body.dataset.level,
+    over: !!document.querySelector(".overlay"),
+    hint: !!document.querySelector("#keyboard-hint.show"),
+    ships: [...document.querySelectorAll(".ship")].map((el) => {
+      const box = el.getBoundingClientRect();
+      return { text: el.dataset.text, top: box.top, bottom: box.bottom, height: box.height };
+    }),
+  };
+});
+
+// How far down its own travel a ship is: 0 on the spawn line, 1 at the ground.
+const travelFraction = (state, ship) =>
+  (ship.top - SPAWN_TOP) / Math.max(1, state.ground - SPAWN_TOP - ship.height);
+
+// The largest change of the fraction of the play height a ship keeps, matched by
+// its word so the order of the sky never matters. A ship that vanished, or a new
+// one that arrived, is a full change: the sky must not change at all here.
+function fractionDrift(from, to) {
+  if (from.ships.length !== to.ships.length) return 1;
+  let worst = 0;
+  for (const ship of from.ships) {
+    const twin = to.ships.find((other) => other.text === ship.text);
+    if (!twin) return 1;
+    worst = Math.max(worst, Math.abs(travelFraction(to, twin) - travelFraction(from, ship)));
+  }
+  return worst;
+}
+
+const round = (n) => Math.round(n);
+const list = (ships) => ships.map((ship) => round(ship.top)).join(", ");
+
+// iOS slides the software keyboard in: it fires resize and scroll on the visual
+// viewport several times while the visible height shrinks, and it can also
+// scroll the page, which turns visualViewport.offsetTop into a number above 0.
+const openKeyboardLikeIos = (page, { height, offsetTop = 0, steps = 4 }) => page.evaluate(({ height, offsetTop, steps }) => {
+  const view = window.visualViewport;
+  const full = window.innerHeight;
+  for (let step = 1; step <= steps; step++) {
+    const shrunk = Math.round(full - (full - height) * (step / steps));
+    const top = Math.round(offsetTop * (step / steps));
+    Object.defineProperty(view, "height", { configurable: true, get: () => shrunk });
+    Object.defineProperty(view, "offsetTop", { configurable: true, get: () => top });
+    view.dispatchEvent(new Event("resize"));
+    view.dispatchEvent(new Event("scroll"));
+  }
+}, { height, offsetTop, steps });
+
+const closeKeyboardLikeIos = (page) => page.evaluate(() => {
+  const view = window.visualViewport;
+  delete view.height;
+  delete view.offsetTop;
+  view.dispatchEvent(new Event("resize"));
+  view.dispatchEvent(new Event("scroll"));
+});
+
+// S5 (L5/T6): on a real iPad tapping "abrir teclado" ended the game at once. The
+// ground moves up with the keyboard, so every ship already below it landed in
+// the same frame and each landing cost a heart. Opening or closing the keyboard
+// must never cost a life: the ships keep their place in the smaller sky.
+async function keyboardCostsNoLives() {
+  const game = await openGame("juegos/teclado.html", { clock: true });
+  const { page } = game;
+  await tapGrade(page, 1);
+  await page.evaluate(() => window.advanceFrames(600)); // the first ship is on screen
+  await tapGame(page); // the child taps the play area: the tablet keyboard opens
+  await page.evaluate(() => window.advanceFrames(20000)); // the ships fly down
+  const before = await playState(page);
+  check(before.hearts === "3", `tablet S5: all three hearts are still there before the keyboard opens (${before.hearts})`);
+  check(before.ships.length === 2, `tablet S5: two ships are in the sky before the keyboard opens (${before.ships.length})`);
+  check(before.ships.every((ship) => ship.top > 300), `tablet S5: the ships are already in the lower part of the screen (${list(before.ships)})`);
+
+  await openKeyboardLikeIos(page, { height: 600 });
+  await page.waitForTimeout(120);
+  const open = await playState(page);
+  check(open.ground < before.ground - 100, `tablet S5: the ground moves up with the keyboard (${round(before.ground)} -> ${round(open.ground)})`);
+  check(open.hearts === "3", `tablet S5: opening the keyboard costs no hearts (${open.hearts} of 3)`);
+  check(!open.over, "tablet S5: opening the keyboard does not end the level");
+  check(open.level === before.level, `tablet S5: the same level keeps playing (${before.level} -> ${open.level})`);
+  check(open.ships.length === before.ships.length, `tablet S5: no ship is swallowed by the keyboard (${before.ships.length} -> ${open.ships.length})`);
+  check(open.ships.every((ship) => ship.bottom <= open.ground), `tablet S5: every ship stays above the new ground (${open.ships.map((ship) => `${round(ship.bottom)} of ${round(open.ground)}`).join(", ")})`);
+  const opened = fractionDrift(before, open);
+  check(opened <= 0.05, `tablet S5: each ship keeps the same fraction of the play height (largest change ${opened.toFixed(3)})`);
+
+  await page.evaluate(() => window.advanceFrames(300)); // the frames that follow the tap
+  const settled = await playState(page);
+  check(settled.hearts === "3", `tablet S5: the hearts survive the frames right after the keyboard opens (${settled.hearts} of 3)`);
+
+  await closeKeyboardLikeIos(page);
+  await page.waitForTimeout(120);
+  const closed = await playState(page);
+  check(Math.abs(closed.ground - before.ground) <= 1, `tablet S5: closing the keyboard gives the full play area back (${round(closed.ground)})`);
+  check(closed.hearts === "3", `tablet S5: closing the keyboard costs no hearts either (${closed.hearts} of 3)`);
+  const closedDrift = fractionDrift(before, closed);
+  check(closedDrift <= 0.05, `tablet S5: the ships come back to the same fraction of the full play area (largest change ${closedDrift.toFixed(3)})`);
+
+  // iOS can also scroll the page while the field takes the focus.
+  await openKeyboardLikeIos(page, { height: 600, offsetTop: 120 });
+  await page.waitForTimeout(120);
+  const scrolled = await playState(page);
+  check(scrolled.hearts === "3", `tablet S5: a keyboard that also scrolls the page costs no hearts (${scrolled.hearts} of 3)`);
+  check(!scrolled.over, "tablet S5: a keyboard that also scrolls the page does not end the level");
+  check(scrolled.ships.every((ship) => ship.bottom <= scrolled.ground), `tablet S5: every ship stays above the ground under a scrolled keyboard (${scrolled.ships.map((ship) => `${round(ship.bottom)} of ${round(scrolled.ground)}`).join(", ")})`);
+  const scrolledDrift = fractionDrift(closed, scrolled);
+  check(scrolledDrift <= 0.05, `tablet S5: a scrolled keyboard keeps every ship in place too (largest change ${scrolledDrift.toFixed(3)})`);
+  await closeKeyboardLikeIos(page);
+  await close(game, "tablet keyboard and lives");
+}
+
+// S5 (T6, D5): on a tablet the child can type only with the on-screen keyboard
+// open, so the ships hold still while the tap target is showing. That pause must
+// not skew the level timers nor the words per minute.
+async function shipsWaitForTyping() {
+  const game = await openGame("juegos/teclado.html", { clock: true });
+  const { page } = game;
+  const wpm = () => page.evaluate(() => {
+    const found = document.querySelector("#stats").textContent.match(/Palabras\/min: (\d+)/);
+    return found ? Number(found[1]) : null;
+  });
+  await tapGrade(page, 5);
+  await page.evaluate(() => window.advanceFrames(1000));
+  const waiting = await playState(page);
+  check(waiting.hint, "tablet S5: the tap target is showing, so the child cannot type yet");
+  check(waiting.ships.length === 1, `tablet S5: one ship waits on screen for the child (${waiting.ships.length})`);
+  await page.evaluate(() => window.advanceFrames(6000)); // longer than the level's spawn interval
+  const still = await playState(page);
+  const frozen = fractionDrift(waiting, still);
+  check(frozen <= 0.02, `tablet S5: the ships do not descend while the tap target is showing (largest move ${frozen.toFixed(3)} of the play height)`);
+  check(still.ships.length === waiting.ships.length, `tablet S5: no new ship arrives while the child cannot type (${waiting.ships.length} -> ${still.ships.length})`);
+  check(still.hearts === "3", `tablet S5: waiting for the keyboard costs no hearts (${still.hearts} of 3)`);
+
+  await tapGame(page); // the child opens the keyboard
+  check(!(await page.locator("#keyboard-hint").isVisible()), "tablet S5: the tap target hides once the keyboard is open");
+  await page.evaluate(() => window.advanceFrames(1000));
+  const moving = await playState(page);
+  check(moving.ships.length && moving.ships[0].top > still.ships[0].top + 2, `tablet S5: the ships descend again once the keyboard is open (${round(still.ships[0]?.top)} -> ${round(moving.ships[0]?.top)})`);
+
+  // A clean typing measurement: the ship on screen is killed by typing its word,
+  // and the next one arrives while the keyboard is still open.
+  const word = await page.locator(".ship").first().getAttribute("data-text");
+  await page.keyboard.insertText(word);
+  await page.evaluate(() => window.advanceFrames(1000));
+  const typed = await playState(page);
+  check(typed.ships.length === 1 && typed.ships[0].text !== word, `tablet S5: a new ship arrives while the child types (${typed.ships[0]?.text})`);
+  const measured = await wpm();
+  check(typeof measured === "number" && measured > 0, `tablet S5: the words per minute are measured while typing (${measured})`);
+
+  await page.evaluate(() => document.querySelector(".key-catcher").blur()); // the child closes the keyboard
+  await page.waitForTimeout(120);
+  check(await page.locator("#keyboard-hint").isVisible(), "tablet S5: closing the keyboard shows the tap target again");
+  await page.evaluate(() => window.advanceFrames(60000)); // a whole minute with the keyboard closed
+  const paused = await playState(page);
+  check(paused.hearts === "3", `tablet S5: a minute with the keyboard closed costs no hearts (${paused.hearts} of 3)`);
+  check(paused.ships.length === typed.ships.length, `tablet S5: a minute with the keyboard closed sends no new ship (${typed.ships.length} -> ${paused.ships.length})`);
+  const pausedDrift = fractionDrift(typed, paused);
+  check(pausedDrift <= 0.02, `tablet S5: the ships do not descend for a minute without the keyboard (largest move ${pausedDrift.toFixed(3)} of the play height)`);
+  const afterMinute = await wpm();
+  check(measured !== null && afterMinute === measured, `tablet S5: the minute without the keyboard does not skew the words per minute (${measured} -> ${afterMinute})`);
+
+  await tapGame(page); // the child opens the keyboard again
+  await page.evaluate(() => window.advanceFrames(1000));
+  const resumed = await playState(page);
+  const waitingShip = paused.ships[0];
+  const sameShip = waitingShip && resumed.ships.find((ship) => ship.text === waitingShip.text);
+  check(!!sameShip && sameShip.top > waitingShip.top + 2, `tablet S5: the ships descend again after the child taps to type (${round(waitingShip?.top)} -> ${round(sameShip?.top)})`);
+  await close(game, "tablet typing pause");
+}
+
 (async () => {
   await tapToType();
   await inputWithoutKeydown();
   await keydownPlusInput();
+  await androidCompositionLetters();
   await accentedLetters();
   await keyboardDismissal();
   await keyboardShrinksPlayArea();
+  await keyboardCostsNoLives();
+  await shipsWaitForTyping();
   await desktopUnchanged();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 })().catch((e) => { console.error(e); console.error(`TOTAL before error: ${okCount} ok, ${failCount} FAIL`); process.exit(1); });
