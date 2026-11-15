@@ -1,6 +1,41 @@
 // Enciende las estrellas: hold the pointer on the star until its ring fills.
 // Quick passes and clicks never catch it; from level 2 the star drifts.
+const path = require("path");
+const os = require("os");
+const { chromium } = require("playwright-core");
 const { openGame, pressPlay, check, finish } = require("./helpers");
+
+const ROOT = "file://" + path.resolve(__dirname, "..");
+const EXECUTABLE =
+  process.env.CHROME_PATH ||
+  path.join(os.homedir(), ".cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell");
+
+// The shared helper is a desktop mouse at 1366x768; an iPad is a finger at
+// 768x1024. Local copy with touch on, like tests/test-tablet-common.js.
+async function openTablet(file) {
+  const browser = await chromium.launch({ executablePath: EXECUTABLE });
+  const page = await browser.newPage({ viewport: { width: 768, height: 1024 }, hasTouch: true });
+  const errors = [];
+  const external = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  page.on("request", (r) => !r.url().startsWith("file://") && external.push(r.url()));
+  await page.goto(`${ROOT}/${file}`);
+  return { browser, page, errors, external };
+}
+
+async function touch(client, type, point) {
+  await client.send(
+    "Input.dispatchTouchEvent",
+    type === "touchEnd" ? { type, touchPoints: [] } : { type, touchPoints: [{ x: point.x, y: point.y }] }
+  );
+}
+
+// Wait until the ring on screen fills enough to be read as "filling".
+async function fillAfter(page, ms) {
+  await page.waitForTimeout(ms);
+  return fill(page);
+}
 
 async function center(page) {
   // One atomic read: the star may vanish between two separate queries.
@@ -49,13 +84,14 @@ async function hold(page) {
     await page.mouse.move(20, 700);
     check((await caught(page)) === 0, "a quick pass or a click does not catch the star");
 
-    // Holding fills the ring; leaving empties it slowly.
+    // Holding fills the ring; leaving empties it slowly. A mouse click is not
+    // a lift: the hover keeps filling after it, exactly as it did before.
     await page.mouse.move(c.x, c.y);
+    await page.mouse.down();
+    await page.mouse.up();
     await page.waitForTimeout(450);
     const half = await fill(page);
     check(half > 0.2 && half < 1, `holding fills the ring (${half})`);
-    await page.mouse.down();
-    await page.mouse.up();
     check((await caught(page)) === 0, "clicking on the star does not speed it up");
     await page.mouse.move(20, 700);
     await page.waitForTimeout(300);
@@ -101,6 +137,65 @@ async function hold(page) {
       await page.locator(".sky-dot").first().evaluate((el) => getComputedStyle(el).animationName === "none"),
       "reduced motion stops the twinkling sky"
     );
+
+    // ---------- iPad: a finger that lands on a star and rests on it ----------
+    // iOS Safari fires pointerdown for a finger but no pointermove while the
+    // finger rests, so touching a star and holding it must fill the ring;
+    // lifting the finger must stop filling again. The mouse keeps hovering.
+    const tablet = await openTablet("juegos/estrellas.html");
+    const finger = tablet.page;
+    try {
+      await finger.click(".overlay .play-btn", { force: true });
+      await finger.waitForSelector(".star-target");
+      const client = await finger.context().newCDPSession(finger);
+      await finger.evaluate(() => {
+        window.__presses = 0;
+        window.__cancels = 0;
+        window.addEventListener("pointerdown", (e) => e.pointerType === "touch" && window.__presses++);
+        window.addEventListener("pointercancel", () => window.__cancels++);
+      });
+
+      const first = await center(finger);
+      // Park the mouse far away, so only the finger can fill this star.
+      await finger.mouse.move(760, 1010);
+      // touchStart only: no touchMove follows while the finger rests.
+      await touch(client, "touchStart", first);
+      const resting = await fillAfter(finger, 450);
+      check((await finger.evaluate(() => window.__presses)) >= 1, "the touch harness delivers a real touch pointerdown");
+      check(resting > 0.2 && resting < 1, `resting a finger on the star fills the ring (${resting})`);
+      check((await finger.evaluate(() => window.__cancels)) === 0, "no pointercancel interrupts the finger hold");
+
+      const deadline = Date.now() + 5000;
+      let collected = await caught(finger);
+      while (collected === 0 && Date.now() < deadline) {
+        await finger.waitForTimeout(100);
+        collected = await caught(finger);
+      }
+      check(collected >= 1, `a finger holding still on the star collects it (${collected})`);
+
+      // The next star: a finger fills it, lifting the finger empties it.
+      await finger.waitForSelector(".star-target");
+      const next = await center(finger);
+      await touch(client, "touchStart", next);
+      const held = await fillAfter(finger, 400);
+      check(held > 0.2 && held < 1, `the next star fills under a resting finger (${held})`);
+      await touch(client, "touchEnd", next);
+      const lifted = await fillAfter(finger, 350);
+      check(lifted < held && lifted > 0, `lifting the finger empties the ring (${held} -> ${lifted})`);
+      check((await finger.evaluate(() => window.__cancels)) === 0, "no pointercancel fires when the finger lifts");
+
+      // A mouse on the same tablet page still only hovers (the parked mouse
+      // was far from the star, so this is a genuine hover).
+      const hover = await center(finger);
+      await finger.mouse.move(hover.x, hover.y);
+      const hovered = await fillAfter(finger, 450);
+      check(hovered > 0.2 && hovered < 1, `a mouse on the tablet page still fills by hovering (${hovered})`);
+      check(tablet.errors.length === 0, `no page errors on the tablet page (${tablet.errors.join(" | ")})`);
+      check(tablet.external.length === 0, `no external requests on the tablet page (${tablet.external.join(", ")})`);
+    } finally {
+      await tablet.browser.close();
+    }
+
     await finish(game);
   } catch (error) {
     check(false, error.message);

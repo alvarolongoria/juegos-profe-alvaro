@@ -10,6 +10,11 @@
         background: radial-gradient(ellipse at 50% 90%, #6755aa, #24334b 75%);
         /* The finger drag is the game: never let it scroll or zoom the page. */
         touch-action: none;
+        /* iPadOS: a long press on the star must not raise a text callout,
+           its selection or the magnifier, which would steal the hold. */
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
       }
 
       .world-art {
@@ -167,7 +172,19 @@
       let lastTime = 0;
 
       // Only the pointer position matters: buttons never catch the star.
+      // A finger on iOS fires pointerdown but no pointermove while it rests,
+      // so a touch or pen press also counts as "the pointer is here".
+      const isFinger = (e) => e.pointerType === "touch" || e.pointerType === "pen";
       window.addEventListener("pointermove", (e) => (pointer = { x: e.clientX, y: e.clientY }));
+      window.addEventListener("pointerdown", (e) => {
+        if (isFinger(e)) pointer = { x: e.clientX, y: e.clientY };
+      });
+      // A lifted finger points nowhere: the ring empties, as when the mouse leaves.
+      const fingerUp = (e) => {
+        if (isFinger(e)) pointer = null;
+      };
+      window.addEventListener("pointerup", fingerUp);
+      window.addEventListener("pointercancel", fingerUp);
       document.addEventListener("pointerleave", () => (pointer = null));
 
       function randomSpot(size) {
