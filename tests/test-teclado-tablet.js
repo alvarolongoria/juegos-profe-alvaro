@@ -564,19 +564,19 @@ const imeEnd = (page) => page.evaluate(() => {
 });
 
 // What the child sees while typing: hearts, the 6º wrong-key count and accuracy.
-// `typed` belongs to the ship carrying `word`, so a new ship arriving after that
-// word is destroyed can never answer for it.
-const typingState = (page, word) => page.evaluate((word) => {
+// `typed` belongs to the ship that was put on screen on purpose, so a new ship
+// arriving after that one is destroyed can never answer for it.
+const typingState = (page) => page.evaluate(() => {
   const text = document.querySelector("#stats").textContent;
   const match = (re) => (text.match(re) || [])[1] ?? null;
-  const ship = [...document.querySelectorAll(".ship")].find((el) => !word || el.dataset.text === word);
+  const ship = document.querySelector('.ship[data-target="1"]');
   return {
     hearts: document.body.dataset.hearts,
     fallos: match(/Fallos: (\d+)\/3/),
     precision: match(/Precisión: (\d+) %/),
     typed: ship ? Number(ship.dataset.typed) : null,
   };
-}, word);
+});
 
 const show = (state) => JSON.stringify(state);
 
@@ -584,7 +584,9 @@ const show = (state) => JSON.stringify(state);
 // a second word with the same first letter can never steal a keystroke.
 const onlyShip = (page, text) => page.evaluate((text) => {
   alive.forEach(removeShip);
-  return Boolean(spawnOne({ kind: "ship", text }));
+  const ship = spawnOne({ kind: "ship", text });
+  if (ship) ship.el.dataset.target = "1"; // the one this test watches
+  return Boolean(ship);
 }, text);
 
 // S5 (T6/T10): the field's value does not only grow. An Android keyboard shrinks it
@@ -603,11 +605,11 @@ async function androidCompositionEdits() {
     check(await onlyShip(page, word), `tablet T10 ${title}: the known word "${word}" is on screen to type`);
     for (let letter = 1; letter <= prefix.length; letter++) await imeField(page, prefix.slice(0, letter));
     await page.waitForTimeout(80);
-    const typed = await typingState(page, word);
+    const typed = await typingState(page);
     check(typed.typed === prefixTyped, `tablet T10 ${title}: "${prefix}" is typed while composing (${show(typed)})`);
     await edit(page);
     await page.waitForTimeout(100);
-    const after = await typingState(page, word);
+    const after = await typingState(page);
     check(after.typed === expect.typed, `tablet T10 ${title}: the ship has ${expect.typed} letters typed (${show(after)})`);
     check(after.fallos === expect.fallos, `tablet T10 ${title}: ${expect.fallos} wrong keys are counted (${show(after)})`);
     check(after.hearts === expect.hearts, `tablet T10 ${title}: the shield keeps ${expect.hearts} hearts (${show(after)})`);
@@ -641,6 +643,35 @@ async function androidCompositionEdits() {
     expect: { typed: null, fallos: "1", hearts: "3", precision: "86" },
   });
 
+  // A deletion followed by a *different* letter still reaches the game.
+  await scenario("deleted letter", {
+    word: "cigüeña", prefix: "cigüe",
+    edit: async (page) => {
+      await imeField(page, "cigü");
+      await imeField(page, "cigüñ");
+    },
+    expect: { typed: 6, fallos: "0", hearts: "3", precision: "100" },
+  });
+
+  // R3: the child erases a letter the game has already accepted and types the same
+  // letter again. It was already typed, so nothing new may reach the game, and the
+  // word has to finish normally afterwards instead of collecting wrong keys.
+  {
+    const game = await openGame("juegos/teclado.html");
+    const { page } = game;
+    await tapGrade(page, 6);
+    await tapGame(page);
+    check(await onlyShip(page, "cigüeña"), "tablet T11 delete and retype: the known word is on screen to type");
+    for (const value of ["cigüe", "cigü", "cigüe", "cigüeñ", "cigüeña"]) await imeField(page, value);
+    await page.waitForTimeout(120);
+    const after = await typingState(page);
+    check(after.typed === null, `tablet T11 delete and retype: the word is finished and its ship destroyed (${show(after)})`);
+    check(after.fallos === "0", `tablet T11 delete and retype: no wrong key is counted (${show(after)})`);
+    check(after.hearts === "3", `tablet T11 delete and retype: the shield keeps three hearts (${show(after)})`);
+    check(after.precision === "100", `tablet T11 delete and retype: the accuracy stays at 100 % (${show(after)})`);
+    await close(game, "tablet delete and retype");
+  }
+
   // Ending the composition after the letters were handed over types nothing again.
   {
     const game = await openGame("juegos/teclado.html");
@@ -652,7 +683,7 @@ async function androidCompositionEdits() {
     for (let letter = 1; letter <= "cigüeña".length; letter++) await imeField(page, "cigüeña".slice(0, letter));
     await imeEnd(page);
     await page.waitForTimeout(150);
-    const after = await typingState(page, "cigüeña");
+    const after = await typingState(page);
     check(after.fallos === "0" && after.hearts === "3", `tablet T10 compositionend: ending the composition types no wrong key (${show(after)})`);
     check(after.precision === "100", `tablet T10 compositionend: the accuracy stays at 100 % after the composition ends (${show(after)})`);
     check(await countsOnce(page, before), "tablet T10 compositionend: the word destroys its ship exactly once");

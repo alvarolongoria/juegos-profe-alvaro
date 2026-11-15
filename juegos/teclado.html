@@ -1125,10 +1125,17 @@
       };
       const takeComposed = (composing = false) => {
         const text = catcher.value;
-        const fresh = text.slice(commonStart(text, handedOver));
+        const shared = commonStart(text, handedOver);
+        // A deletion ("cigüe" -> "cigü") only hides letters the game has already
+        // typed: the mark keeps them, so typing the same letter again adds nothing
+        // and the next expected letter is not asked for early. Anything else that
+        // is new (a growth or a replacement such as "n" -> "ñ") still reaches the
+        // game and becomes the accepted text.
+        const deleted = text.length < handedOver.length && shared === text.length;
+        const fresh = deleted ? "" : text.slice(shared);
         // A composition that is still open keeps its text: an input method that
         // loses it would start the word again. It is emptied when it ends.
-        handedOver = composing ? text : "";
+        handedOver = composing ? (deleted ? handedOver : text) : "";
         if (!composing) catcher.value = "";
         if (playing) for (const ch of fresh) if (!typedOnce(ch)) typeKey(ch);
       };
