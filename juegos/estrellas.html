@@ -153,7 +153,9 @@
         const dot = document.createElement("div");
         dot.className = "sky-dot";
         dot.setAttribute("aria-hidden", "true");
-        dot.style.left = `${Math.random() * 100}%`;
+        // Stay a little away from the right edge: a dot at 100% hangs 4px out
+        // and makes the whole page 4px wider on a phone.
+        dot.style.left = `${Math.random() * 98}%`;
         dot.style.top = `${Math.random() * 100}%`;
         dot.style.animationDelay = `${Math.random() * 3}s`;
         document.body.append(dot);

@@ -83,6 +83,16 @@
       @keyframes hover { 50% { transform: translateY(-5px); } }
       @keyframes fade { to { opacity: 0; } }
       @media (max-height: 650px) { .ship .label { font-size: 28px; } body[data-grade="1"] .ship .label { font-size: 40px; } .ship svg { width: 60px; height: 45px; } #cannon { width: 96px; height: 77px; margin-left: -48px; } .grade-row .play-btn { width: 80px; height: 80px; font-size: 30px; } }
+      /* S7 (T9): on a phone the shared star pill owns the first header row, so the
+         three score boxes share one compact row right below it. Everything stays
+         visible and keeps clear of the star pill and the prize case. */
+      @media (max-width: 600px) {
+        #streak, #stats, #level-badge { padding: 4px 8px; border-radius: 12px; }
+        #streak { top: 122px; left: 10px; min-width: 0; font-size: 14px; }
+        #streak strong { font-size: 20px; }
+        #stats { top: 122px; right: 10px; font-size: 12px; line-height: 1.25; }
+        #level-badge { top: 122px; font-size: 15px; }
+      }
       @media (prefers-reduced-motion: reduce) {
         *, *::before, *::after { animation: none !important; transition: none !important; }
         .particle, .confetti, .wrong-button-hint { display: none; }
@@ -308,6 +318,8 @@
         }
         statsBox.textContent = lines.join("\n");
         stats.lastPublished = performance.now();
+        // The score boxes may have grown: the phone spawn line has to be measured again.
+        spawnLineCache = null;
       }
 
       function spawnOne(forced = null) {
@@ -392,7 +404,7 @@
         // S7: each wave ship starts higher than the last, so they land one after
         // another. S8: a bomb or the ice appears above the ships it acts on.
         const topmost = Math.min(Infinity, ...alive.filter(isThreat).map((s) => s.y));
-        const startY = SHIP_EFFECTS.includes(kind) ? Math.min(topmost, 90) - 40 : forced?.y ?? (kind === "child" ? mother.y : 90);
+        const startY = SHIP_EFFECTS.includes(kind) ? Math.min(topmost, spawnLine()) - 40 : forced?.y ?? (kind === "child" ? mother.y : spawnLine());
         const ship = { el, label, text, kind, typed: 0, x: 0, y: startY, dx: 0 };
         if (isThreat(ship) && freezeRemaining > 0) el.classList.add("frozen");
         drawLabel(ship);
@@ -429,7 +441,7 @@
         for (let made = 0; made < count; made++) {
           const taken = alive.map((s) => s.text[0].toLowerCase());
           const pool = SWARM[grade].filter((t) => !taken.includes(t[0].toLowerCase()));
-          if (!pool.length || !spawnOne({ kind: "ship", text: Juegos.pick(pool), y: 90 - made * SWARM_STAGGER })) return;
+          if (!pool.length || !spawnOne({ kind: "ship", text: Juegos.pick(pool), y: spawnLine() - made * SWARM_STAGGER })) return;
         }
       }
 
@@ -455,9 +467,9 @@
         const width = el.offsetWidth;
         const side = index % 3; // 0 left, 1 centre, 2 right
         const x = side === 0 ? 20 : side === 1 ? (innerWidth - width) / 2 : innerWidth - width - 20;
-        const ship = { el, label, text, kind: "meteor", typed: 0, x, y: 90, dx: 0 };
+        const ship = { el, label, text, kind: "meteor", typed: 0, x, y: spawnLine(), dx: 0 };
         // A diagonal that ends inside the screen at the ground.
-        const drop = Math.max(1, groundY() - 90 - el.offsetHeight);
+        const drop = Math.max(1, groundY() - spawnLine() - el.offsetHeight);
         ship.vy = drop / rule.fall;
         ship.dx = side === 1 ? 0 : (side === 0 ? 1 : -1) * Math.min(innerWidth / 3, drop) / rule.fall;
         drawLabel(ship);
@@ -492,7 +504,10 @@
         ship.el.style.transform = `translate(${ship.x}px, ${ship.y}px)`;
       }
 
-      window.addEventListener("resize", () => alive.forEach(place));
+      window.addEventListener("resize", () => {
+        spawnLineCache = null;
+        alive.forEach(place);
+      });
 
       // S2/R3: the tablet's soft keyboard is tracked apart from the field focus.
       // Android can hide the keyboard (its Back button) with the field still
@@ -505,8 +520,22 @@
       // S5 (T6): every ship starts on this line (spawnOne uses the same y) and
       // flies from it down to the ground, so how far it has gone is a fraction
       // of that travel.
-      const SPAWN_LINE = 90;
-      const travelOf = (ship, ground) => Math.max(1, ground - SPAWN_LINE - ship.el.offsetHeight);
+      // S7 (T9): on a phone the header is two rows tall (the star pill plus the
+      // score boxes), so the line moves below it and no ship starts hidden. On a
+      // computer or a tablet it stays at 90px, exactly as before.
+      // The boxes only change size when the score text or the screen does, so the
+      // measured line is cached instead of reflowing the page on every frame.
+      let spawnLineCache = null;
+      function spawnLine() {
+        if (innerWidth > 600) return 90;
+        if (spawnLineCache === null) {
+          const header = [".progress", ".trophies", ".home-btn", "#streak", "#stats", "#level-badge"]
+            .map((selector) => document.querySelector(selector)?.getBoundingClientRect().bottom ?? 0);
+          spawnLineCache = Math.max(90, Math.round(Math.max(0, ...header)) + 12);
+        }
+        return spawnLineCache;
+      }
+      const travelOf = (ship, ground) => Math.max(1, ground - spawnLine() - ship.el.offsetHeight);
       // S5 (T6), the bug the iPad showed: opening the soft keyboard raises the
       // ground by 300-400px at once, so every ship already below the new ground
       // landed in the same frame and each landing cost a heart ("es como que se
@@ -514,11 +543,12 @@
       // its travel in the new sky keeps the game fair instead.
       function moveWithGround(groundBefore, groundAfter) {
         const shrank = groundAfter < groundBefore - 1;
+        const line = spawnLine();
         for (const ship of alive) {
-          const fraction = Math.min(1, Math.max(0, (ship.y - SPAWN_LINE) / travelOf(ship, groundBefore)));
-          ship.y = SPAWN_LINE + fraction * travelOf(ship, groundAfter);
+          const fraction = Math.min(1, Math.max(0, (ship.y - line) / travelOf(ship, groundBefore)));
+          ship.y = line + fraction * travelOf(ship, groundAfter);
           // A smaller sky never swallows a ship: it keeps a pixel of air.
-          if (shrank) ship.y = Math.max(SPAWN_LINE, Math.min(ship.y, groundAfter - ship.el.offsetHeight - 1));
+          if (shrank) ship.y = Math.max(line, Math.min(ship.y, groundAfter - ship.el.offsetHeight - 1));
           place(ship);
         }
       }
@@ -624,7 +654,7 @@
             // interval, and that margin shrinks level by level.
             // Recalculate from the actual ground and object height on every frame.
             const speed = grade === 1 ? config.speed * (1 + 0.12 * level)
-              : Math.max(1, ground - 90 - ship.el.offsetHeight) / (SLACK[grade][level] * interval);
+              : Math.max(1, ground - spawnLine() - ship.el.offsetHeight) / (SLACK[grade][level] * interval);
             const moving = isThreat(ship) ? Math.max(0, dt - frozenAtStart) : dt;
             ship.el.classList.toggle("frozen", isThreat(ship) && freezeRemaining > 0);
             // Children descend faster than their mother, but leave enough

@@ -309,6 +309,76 @@ img {
   box-shadow: 0 0 0 6px #fff7e4;
 }
 
+/* Phone portrait (a 412px-wide Galaxy S26, a 360px-wide Android): the star bar
+   gets a row of its own under the home button and the prize case, so nothing
+   overlaps and no star spills out of its pill. Desktop and tablet keep every
+   size above, because this only applies to narrow screens. */
+@media (max-width: 600px) {
+  .home-btn {
+    top: 10px;
+    left: 10px;
+    width: 58px;
+    height: 58px;
+    font-size: 32px;
+    box-shadow: 0 4px #24334b;
+  }
+
+  .home-btn::after {
+    inset: 8px;
+  }
+
+  .progress {
+    top: 76px;
+    left: 10px;
+    right: 10px;
+    bottom: auto;
+    width: auto;
+    max-width: none;
+    margin-inline: 0;
+    justify-content: center;
+    gap: 1px;
+    padding: 4px 8px;
+    border-radius: 28px;
+    box-shadow: 0 3px #24334b;
+  }
+
+  .progress span {
+    font-size: clamp(16px, 4.4vw, 26px);
+    border-bottom-width: 2px;
+  }
+
+  .trophies {
+    top: 10px;
+    right: 10px;
+    gap: 2px;
+    padding: 4px 6px;
+    border-radius: 16px;
+  }
+
+  .trophy-slot {
+    width: 26px;
+    height: 34px;
+  }
+
+  .trophy-count {
+    font-size: 10px;
+    padding: 0 2px;
+    bottom: -2px;
+    right: -5px;
+  }
+
+  .medals {
+    top: 10px;
+    right: 10px;
+    width: auto;
+    max-width: calc(100% - 84px);
+    min-height: 0;
+    max-height: 58px;
+    padding: 2px 10px;
+    font-size: 22px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .home-btn, .progress span { transition: none; }
   .overlay .big-emoji,

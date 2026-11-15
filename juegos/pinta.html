@@ -76,6 +76,13 @@
         .sun, .drawing.alive svg { animation: none; }
         .drawing .zone { transition: none; }
       }
+
+      /* Phone portrait: the star pill owns a second header row in common.css, so
+         the drawing moves down a little to start below it. */
+      @media (max-width: 600px) {
+        .drawing { top: 124px; width: min(840px, 88vw, calc((100vh - 160px) * 1.5)); }
+        .sun { top: 124px; right: 16px; width: 60px; height: 60px; }
+      }
     </style>
   </head>
   <body>

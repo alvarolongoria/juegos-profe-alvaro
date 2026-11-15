@@ -126,6 +126,15 @@
         .hole { margin-top: -65px; }
       }
 
+      /* Phone portrait: six 210px holes in three columns do not fit a phone and
+         the outside columns were cut off. The page lays them out in two columns
+         (see holeLayout in the script) and each hole shrinks with the screen. */
+      @media (max-width: 600px) {
+        .mole { left: 8%; width: 84%; height: 84%; }
+        .hole::before { left: 4px; right: 4px; bottom: 4px; height: 34%; border-width: 4px; }
+        .hole::after { height: 24%; border-bottom-width: 10px; }
+      }
+
       .start-mole {
         width: 220px;
         height: 220px;
@@ -175,10 +184,33 @@
         { goal: 9, show: 1500, max: 2, gap: 350 },
         { goal: 12, show: 1200, max: 2, gap: 250 },
       ];
-      const SPOTS = [
-        [22, 210], [50, 210], [78, 210],
-        [22, 450], [50, 450], [78, 450],
-      ];
+      // Six holes: three per row on a desktop or tablet. A phone screen only
+      // fits two columns without the holes touching, so it gets two columns of
+      // three rows and smaller holes instead.
+      function holeLayout() {
+        if (window.innerWidth > 600) {
+          return {
+            size: null,
+            spots: [[22, 210], [50, 210], [78, 210], [22, 450], [50, 450], [78, 450]],
+          };
+        }
+        const size = Math.round(window.innerWidth * 0.44);
+        const first = 160;
+        const step = size + 16;
+        const spots = [];
+        for (let row = 0; row < 3; row++) {
+          for (const left of [27, 73]) spots.push([left, first + row * step]);
+        }
+        return { size, spots };
+      }
+
+      // The base hole is 210px wide, which is more than the space between two
+      // phone columns, so a phone also gets its own pixel size.
+      function applyHoleBox(hole, size) {
+        if (!size) return;
+        hole.style.width = `${size}px`;
+        hole.style.height = `${size}px`;
+      }
 
       function moleSvg() {
         return `<svg viewBox="0 0 160 160" aria-hidden="true">
@@ -206,11 +238,13 @@
         document.body.append(f);
       }
 
-      const moles = SPOTS.map(([left, top]) => {
+      const layout = holeLayout();
+      const moles = layout.spots.map(([left, top]) => {
         const hole = document.createElement("div");
         hole.className = "hole";
         hole.style.left = `${left}%`;
         hole.style.top = `${top}px`;
+        applyHoleBox(hole, layout.size);
         const pit = document.createElement("div");
         pit.className = "pit";
         const el = document.createElement("div");

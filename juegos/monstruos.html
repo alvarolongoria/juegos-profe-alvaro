@@ -32,7 +32,14 @@
     @keyframes glow { to { box-shadow: 0 0 28px #fff; } }
     @keyframes dance { 25% { transform: rotate(-7deg) translateY(-12px); } 75% { transform: rotate(7deg) translateY(-12px); } }
     @media (max-height: 650px) { .monster { top: 18%; height: 300px; transform: scale(.85); transform-origin: top center; } .tray { bottom: 12px; padding: 10px; } }
-    @media (max-width: 650px) { .tray { gap: 6px; padding: 10px; } .part { width: 65px; height: 80px; font-size: 48px; } .progress { top: 100px; } .progress span { font-size: 23px; } }
+    @media (max-width: 650px) { .tray { gap: 6px; padding: 10px; } .part { width: 65px; height: 80px; font-size: 48px; } }
+    /* Phone portrait: the star pill already has its own row in common.css, so the
+       monster starts below it and the three drop slots keep clear of the HUD. */
+    @media (max-width: 600px) {
+      .monster { top: 156px; left: calc(50% - 172px); width: 344px; height: 320px; border-width: 6px; }
+      .slot { width: 92px; height: 80px; font-size: 50px; border-width: 3px; border-radius: 20px; }
+      .part svg, .slot svg { width: 76px; height: 68px; }
+    }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
   </style>
 </head>

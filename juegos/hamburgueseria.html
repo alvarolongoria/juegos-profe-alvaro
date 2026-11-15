@@ -255,6 +255,24 @@
         .customer, .customer.happy, .order .layer.next, .ingredient.hint, .plate .layer, .ingredient.drag-hint::after { animation: none; }
         .flash-ok { animation-duration: 0.01ms; }
       }
+
+      /* Phone portrait: the star pill owns a second header row in common.css.
+         The customer and the order share the top, the plate sits in the middle
+         and the six ingredients wrap into two rows of three, so nothing runs
+         off the sides and every ingredient is still easy to hit. */
+      @media (max-width: 600px) {
+        .counter { height: 232px; }
+        .kitchen { height: calc(100% - 232px); }
+        .customer { top: 128px; left: 8px; width: 118px; height: 158px; }
+        .order { top: 124px; left: 138px; width: calc(100% - 146px); max-width: 220px; min-height: 168px; padding: 10px; border-radius: 26px; }
+        .order::before { left: -22px; top: 46px; border-width: 12px; border-right-width: 22px; }
+        .order .layer { width: 96px; }
+        .plate { left: 50%; right: auto; transform: translateX(-50%); bottom: 220px; width: 220px; height: 230px; padding-bottom: 24px; }
+        .plate .layer { width: 170px; }
+        .tray { left: 50%; width: calc(100% - 16px); max-width: 420px; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 10px; bottom: 12px; }
+        .ingredient { width: 96px; height: 86px; padding: 6px; }
+        .ingredient svg { width: 80px; }
+      }
     </style>
   </head>
   <body>

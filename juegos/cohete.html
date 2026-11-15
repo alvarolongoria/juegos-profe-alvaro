@@ -37,6 +37,15 @@
       #space-key::after { content: ''; width: 75%; height: 15px; border: solid #475569; border-width: 0 4px 4px; }
       .key.active, .key.hint { animation: pulse 1s ease-in-out infinite; border-color: #facc15; }
       .key.lit, .key.hint { background: #fef08a; }
+      /* Phone portrait: the header is two rows high (stars get their own row),
+         the hearts move next to the home button and both keys split the bottom
+         row, so neither of them is cut off at a screen edge. */
+      @media (max-width: 600px) {
+        #lives { top: 18px; left: 78px; gap: 1px; padding: 3px 8px; font-size: 20px; }
+        #world { inset: 120px 0 130px; }
+        #enter-key { left: 12px; width: calc(50% - 16px); font-size: clamp(20px, 6vw, 32px); }
+        #space-key { left: calc(50% + 4px); width: calc(50% - 16px); }
+      }
       @media (prefers-reduced-motion: reduce) {
         *, *::after { animation: none !important; transition: none !important; }
       }
