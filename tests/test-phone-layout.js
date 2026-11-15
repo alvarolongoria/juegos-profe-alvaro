@@ -123,6 +123,58 @@ async function noSideOverflow(page, width, label) {
   check(scrollWidth <= width + 1, `${label}: nothing overflows the sides (${scrollWidth} <= ${width})`);
 }
 
+// S7 (T10): a 5º/6º long phrase ("¿Frigorífico o lavavajillas?", "Hoy, después de
+// clase, jugamos.") is wider than a phone screen. The text must shrink and wrap so
+// the child can read the whole word, and a ship must never be pushed off the right
+// edge by its own width. The phrase is spawned by the game itself, so the check is
+// about the layout and not about waiting for a lucky word.
+async function tecladoLongPhrases(browser) {
+  for (const [width, height] of PHONES) {
+    const label = `teclado phrases ${width}x${height}`;
+    const game = await open(browser, "juegos/teclado.html", width, height);
+    const { page } = game;
+    await page.waitForSelector(".overlay .grade-btn");
+    await page.click('.overlay .grade-btn[data-grade="6"]', { force: true });
+    await page.waitForSelector(".progress");
+    const phrase = await page.evaluate(() => {
+      const pool = [...LASER_LINES[6].long, ...GRADES[6].levels[3]];
+      return pool.reduce((longest, text) => (text.length > longest.length ? text : longest));
+    });
+    const spawned = await page.evaluate((text) => {
+      const ship = spawnOne({ kind: "laser", text });
+      return Boolean(ship);
+    }, phrase);
+    check(spawned, `${label}: the longest phrase is on screen to measure (${phrase})`);
+    await page.waitForTimeout(200);
+    const measure = await page.evaluate(() => [...document.querySelectorAll(".ship")].map((el) => {
+      const ship = el.getBoundingClientRect();
+      const text = el.querySelector(".label");
+      const box = text.getBoundingClientRect();
+      const style = getComputedStyle(text);
+      return {
+        word: el.dataset.text,
+        box: { left: ship.left, top: ship.top, right: ship.right, bottom: ship.bottom },
+        text: { left: box.left, top: box.top, right: box.right, bottom: box.bottom },
+        fontSize: parseFloat(style.fontSize),
+        lines: Math.round(box.height / parseFloat(style.lineHeight || style.fontSize)),
+      };
+    }));
+    check(measure.length >= 1, `${label}: ships are on screen (${measure.length})`);
+    const off = measure.filter((ship) => !inside(ship.box, width, height));
+    check(off.length === 0, `${label}: every ship stays inside the screen (${off.map((ship) => `${ship.word} ${show(ship.box)}`).join(" | ")})`);
+    const cut = measure.filter((ship) => !inside(ship.text, width, height));
+    check(cut.length === 0, `${label}: every word is fully readable, nothing cut at a side (${cut.map((ship) => `${ship.word} ${show(ship.text)}`).join(" | ")})`);
+    const longest = measure.find((ship) => ship.word === phrase);
+    check(Boolean(longest), `${label}: the long phrase is the ship being measured`);
+    if (longest) {
+      check(longest.fontSize < 34, `${label}: a long phrase uses a smaller phone font (${longest.fontSize}px)`);
+      check(longest.text.left >= 0 && longest.text.right <= width + 1, `${label}: the long phrase starts and ends on screen (${show(longest.text)})`);
+    }
+    check(game.errors.length === 0, `${label}: no page errors (${game.errors.join(" | ")})`);
+    await game.context.close();
+  }
+}
+
 (async () => {
   const browser = await chromium.launch({ executablePath: EXECUTABLE });
   try {
@@ -343,6 +395,9 @@ async function noSideOverflow(page, width, label) {
       await portal.context.close();
     }
 
+    // ---------- Phone portrait: the long words of 5º-6º ----------
+    await tecladoLongPhrases(browser);
+
     // ---------- Desktop and tablet: the current layout must not move ----------
     for (const [width, height] of PRESERVE) {
       const label = `${width}x${height}`;
@@ -435,6 +490,15 @@ async function noSideOverflow(page, width, label) {
       check(Math.round(stats.top) === 95 && Math.round(width - stats.right) === 16, `teclado ${label}: the score box keeps its base corner (${show(stats)})`);
       check(Math.round(badge.top) === 91 && Math.abs(badge.left + badge.width / 2 - width / 2) < 1, `teclado ${label}: the level badge keeps its base spot (${show(badge)})`);
       check(cannon.width === 120 && cannon.height === 96 && Math.round(height - cannon.bottom) === 0, `teclado ${label}: the cannon keeps its base size and spot (${show(cannon)})`);
+      const shipText = await navy.page.evaluate(() => {
+        const text = document.querySelector(".ship .label");
+        const style = getComputedStyle(text);
+        return { fontSize: parseFloat(style.fontSize), whiteSpace: style.whiteSpace, maxWidth: style.maxWidth, width: text.getBoundingClientRect().width };
+      });
+      check(
+        shipText.fontSize === 48 && shipText.whiteSpace === "pre" && shipText.maxWidth === "none",
+        `teclado ${label}: the ship text keeps its base size and one-line layout (${shipText.fontSize}px ${shipText.whiteSpace} max-width ${shipText.maxWidth})`
+      );
       await navy.context.close();
 
       const portal = await open(browser, "index.html", width, height);

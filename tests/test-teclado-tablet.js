@@ -33,6 +33,13 @@ function frameClock() {
       ms -= step;
     }
   };
+  // A suspended phone (another app, the screen off) delivers one long frame.
+  window.jumpFrames = (ms) => {
+    now += ms;
+    const callbacks = pending;
+    pending = [];
+    callbacks.forEach((fn) => fn(now));
+  };
   Math.random = () => 0.01;
 }
 
@@ -538,16 +545,180 @@ async function shipsWaitForTyping() {
   await close(game, "tablet typing pause");
 }
 
+// One input event from an Android keyboard: the field shows what the input method
+// has so far, and isComposing stays true until something else ends it.
+const imeField = (page, value, { composing = true } = {}) => page.evaluate(({ value, composing }) => {
+  const catcher = document.querySelector(".key-catcher");
+  catcher.value = value;
+  catcher.dispatchEvent(new InputEvent("input", {
+    bubbles: true, data: value.slice(-1), inputType: composing ? "insertCompositionText" : "insertText", isComposing: composing,
+  }));
+}, { value, composing });
+
+// The composition ends: the confirming input that follows carries the field as the
+// game left it, which is empty.
+const imeEnd = (page) => page.evaluate(() => {
+  const catcher = document.querySelector(".key-catcher");
+  catcher.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: catcher.value }));
+  catcher.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", isComposing: false }));
+});
+
+// What the child sees while typing: hearts, the 6º wrong-key count and accuracy.
+// `typed` belongs to the ship carrying `word`, so a new ship arriving after that
+// word is destroyed can never answer for it.
+const typingState = (page, word) => page.evaluate((word) => {
+  const text = document.querySelector("#stats").textContent;
+  const match = (re) => (text.match(re) || [])[1] ?? null;
+  const ship = [...document.querySelectorAll(".ship")].find((el) => !word || el.dataset.text === word);
+  return {
+    hearts: document.body.dataset.hearts,
+    fallos: match(/Fallos: (\d+)\/3/),
+    precision: match(/Precisión: (\d+) %/),
+    typed: ship ? Number(ship.dataset.typed) : null,
+  };
+}, word);
+
+const show = (state) => JSON.stringify(state);
+
+// A known word on screen: the game's own spawner with every other ship removed, so
+// a second word with the same first letter can never steal a keystroke.
+const onlyShip = (page, text) => page.evaluate((text) => {
+  alive.forEach(removeShip);
+  return Boolean(spawnOne({ kind: "ship", text }));
+}, text);
+
+// S5 (T6/T10): the field's value does not only grow. An Android keyboard shrinks it
+// (backspace), replaces a letter ("n" -> "ñ") or swaps in a suggestion, and the
+// first version re-sent the whole text whenever the value no longer started with
+// what it had already handed over: letters that were already typed counted again as
+// wrong keys, so the child got extra fallos, a wrecked accuracy and lost hearts
+// without pressing anything wrong. A shrink must type nothing, and a replacement
+// only what lies beyond the longest common prefix with the text already handed over.
+async function androidCompositionEdits() {
+  const scenario = async (title, { word, prefix, prefixTyped = prefix.length, edit, expect }) => {
+    const game = await openGame("juegos/teclado.html");
+    const { page } = game;
+    await tapGrade(page, 6); // 6º answers every third wrong key with a lost heart
+    await tapGame(page);
+    check(await onlyShip(page, word), `tablet T10 ${title}: the known word "${word}" is on screen to type`);
+    for (let letter = 1; letter <= prefix.length; letter++) await imeField(page, prefix.slice(0, letter));
+    await page.waitForTimeout(80);
+    const typed = await typingState(page, word);
+    check(typed.typed === prefixTyped, `tablet T10 ${title}: "${prefix}" is typed while composing (${show(typed)})`);
+    await edit(page);
+    await page.waitForTimeout(100);
+    const after = await typingState(page, word);
+    check(after.typed === expect.typed, `tablet T10 ${title}: the ship has ${expect.typed} letters typed (${show(after)})`);
+    check(after.fallos === expect.fallos, `tablet T10 ${title}: ${expect.fallos} wrong keys are counted (${show(after)})`);
+    check(after.hearts === expect.hearts, `tablet T10 ${title}: the shield keeps ${expect.hearts} hearts (${show(after)})`);
+    check(after.precision === expect.precision, `tablet T10 ${title}: the accuracy reads ${expect.precision} % (${show(after)})`);
+    await close(game, `tablet composition ${title}`);
+  };
+
+  // A backspace inside the composition types nothing at all.
+  await scenario("shrink", {
+    word: "cigüeña", prefix: "cigüe",
+    edit: (page) => imeField(page, "cigü"),
+    expect: { typed: 5, fallos: "0", hearts: "3", precision: "100" },
+  });
+
+  // "n" replaced by "ñ": only the letter the input method now shows is typed, so
+  // the transient n is the one honest wrong key and the rest is untouched.
+  await scenario("replacement", {
+    word: "cigüeña", prefix: "cigüe",
+    edit: async (page) => {
+      await imeField(page, "cigüen");
+      await imeField(page, "cigüeñ");
+    },
+    expect: { typed: 6, fallos: "1", hearts: "3", precision: "86" },
+  });
+
+  // A suggestion that swaps the mistyped tail for the right one types only that
+  // tail: the wrong l was the child's own keystroke, it is not counted twice.
+  await scenario("suggestion", {
+    word: "lluvia", prefix: "lluvl", prefixTyped: 4,
+    edit: (page) => imeField(page, "lluvia"),
+    expect: { typed: null, fallos: "1", hearts: "3", precision: "86" },
+  });
+
+  // Ending the composition after the letters were handed over types nothing again.
+  {
+    const game = await openGame("juegos/teclado.html");
+    const { page } = game;
+    await tapGrade(page, 6);
+    await tapGame(page);
+    check(await onlyShip(page, "cigüeña"), "tablet T10 compositionend: the known word is on screen to type");
+    const before = await countedNow(page);
+    for (let letter = 1; letter <= "cigüeña".length; letter++) await imeField(page, "cigüeña".slice(0, letter));
+    await imeEnd(page);
+    await page.waitForTimeout(150);
+    const after = await typingState(page, "cigüeña");
+    check(after.fallos === "0" && after.hearts === "3", `tablet T10 compositionend: ending the composition types no wrong key (${show(after)})`);
+    check(after.precision === "100", `tablet T10 compositionend: the accuracy stays at 100 % after the composition ends (${show(after)})`);
+    check(await countsOnce(page, before), "tablet T10 compositionend: the word destroys its ship exactly once");
+    await close(game, "tablet composition end");
+  }
+}
+
+// S5 (T6/T10): a suspended phone delivers one long frame (another app, the screen
+// off). While the keyboard is closed that whole frame belongs to the pause: the
+// first version credited only the capped 0.1 s of the gameplay clock, so the words
+// per minute fell although the child had not typed. Movement must stay capped.
+async function pauseTimingAfterLongFrame() {
+  const game = await openGame("juegos/teclado.html", { clock: true });
+  const { page } = game;
+  // Recompute the score boxes now: a manual frame clock never publishes on its own.
+  const wpm = () => page.evaluate(() => {
+    publish();
+    const found = document.querySelector("#stats").textContent.match(/Palabras\/min: (\d+)/);
+    return found ? Number(found[1]) : null;
+  });
+  await tapGrade(page, 5);
+  await page.evaluate(() => window.advanceFrames(500));
+  await tapGame(page); // the keyboard is open and the game runs
+  await page.evaluate(() => window.advanceFrames(500));
+  const word = await page.locator(".ship").first().getAttribute("data-text");
+  await page.keyboard.insertText(word); // one destroyed ship: a clean typing measurement
+  await page.evaluate(() => window.advanceFrames(500));
+  const measured = await wpm();
+  check(typeof measured === "number" && measured > 0, `tablet S5: the words per minute are measured before the pause (${measured})`);
+
+  await page.evaluate(() => document.querySelector(".key-catcher").blur()); // the phone keyboard closes
+  await page.waitForTimeout(120);
+  const paused = await playState(page);
+  check(paused.hint && paused.hearts === "3", `tablet S5: closing the keyboard pauses the game and shows the tap target (${paused.hearts} hearts, hint ${paused.hint})`);
+  await page.evaluate(() => window.jumpFrames(1500)); // one frame after 1.5 s in the background
+  const still = await wpm();
+  check(still === measured, `tablet S5: a 1.5 s suspended frame during the pause does not skew the words per minute (${measured} -> ${still})`);
+  check((await playState(page)).hearts === "3", "tablet S5: the suspended frame costs no hearts");
+
+  // Movement stays capped: five suspended seconds while playing move a ship as far
+  // as one tenth of a second, never five seconds.
+  await tapGame(page); // the keyboard is open again
+  await page.waitForTimeout(120);
+  const flying = await playState(page);
+  const ship = flying.ships[0];
+  check(Boolean(ship), "tablet S5: a ship is flying before the long playing frame");
+  await page.evaluate(() => window.jumpFrames(5000));
+  const jumped = await playState(page);
+  const twin = ship && jumped.ships.find((other) => other.text === ship.text);
+  check(Boolean(twin) && twin.top > ship.top && twin.top - ship.top < 20,
+    `tablet S5: one five-second frame only moves a ship one tenth of a second (${ship ? round(ship.top) : "?"} -> ${twin ? round(twin.top) : "gone"})`);
+  await close(game, "tablet pause timing");
+}
+
 (async () => {
   await tapToType();
   await inputWithoutKeydown();
   await keydownPlusInput();
   await androidCompositionLetters();
+  await androidCompositionEdits();
   await accentedLetters();
   await keyboardDismissal();
   await keyboardShrinksPlayArea();
   await keyboardCostsNoLives();
   await shipsWaitForTyping();
+  await pauseTimingAfterLongFrame();
   await desktopUnchanged();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 })().catch((e) => { console.error(e); console.error(`TOTAL before error: ${okCount} ok, ${failCount} FAIL`); process.exit(1); });
