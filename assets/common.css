@@ -13,6 +13,9 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+  /* A quick double tap must never zoom the game on a tablet. Games that need
+     the whole gesture (touch-action: none) still override this locally. */
+  touch-action: manipulation;
 }
 
 /* A big white arrow so 6-year-olds always see where the "tip" is. */

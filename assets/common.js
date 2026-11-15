@@ -273,9 +273,28 @@ const Juegos = (() => {
   }
 
   // Right-click shows a friendly "green button" hint instead of a menu.
+  // A touch long-press also raises this event: block the menu, but skip the
+  // mouse hint, because a finger is not a mouse.
+  // iPadOS Safari has no event.sourceCapabilities, so the last press type is
+  // remembered as a fallback: a menu that follows a finger belongs to a finger.
+  const TOUCH_MENU_WINDOW_MS = 1500;
+  let lastPress = { type: "", at: 0 };
+
   function guardRightClick() {
+    window.addEventListener(
+      "pointerdown",
+      (e) => {
+        lastPress = { type: e.pointerType || "", at: Date.now() };
+      },
+      { capture: true, passive: true }
+    );
     window.addEventListener("contextmenu", (e) => {
       e.preventDefault();
+      const caps = e.sourceCapabilities;
+      const fromTouch = caps
+        ? caps.firesTouchEvents
+        : (lastPress.type === "touch" || lastPress.type === "pen") && Date.now() - lastPress.at < TOUCH_MENU_WINDOW_MS;
+      if (fromTouch) return;
       sound.oops();
       const hint = document.createElement("div");
       hint.className = "wrong-button-hint";
