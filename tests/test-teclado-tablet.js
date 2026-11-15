@@ -52,6 +52,22 @@ async function openGame(file, { tablet = true, clock = false } = {}) {
 
 const catcherFocused = (page) => page.evaluate(() => document.activeElement === document.querySelector(".key-catcher"));
 const progress = (page) => page.locator(".progress span.on").count();
+const level = (page) => page.evaluate(() => document.body.dataset.level);
+
+// Wait for an element that was on screen to leave, without a fixed sleep.
+const gone = (handle) => handle.waitForElementState("hidden", { timeout: 3000 }).then(() => true, () => false);
+
+// A destroyed ship is counted once: the progress bar grows by exactly one, or
+// the level ends (which also means the kill counted). No fixed sleeps.
+const countsOnce = (page, before) => page.waitForFunction(({ count, from }) => {
+  if (document.body.dataset.level !== from) return true;
+  return document.querySelectorAll(".progress span.on").length === count;
+}, { count: before.count + 1, from: before.level }, { polling: 50, timeout: 3000 }).then(() => true, () => false);
+
+const countedNow = async (page) => ({ count: await progress(page), level: await level(page) });
+
+// Every object the child is meant to type, small or big.
+const normalShips = '.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="laser"], .ship[data-kind="child"]';
 
 async function tapGrade(page, grade) {
   await page.waitForSelector(".overlay .grade-btn");
@@ -125,12 +141,12 @@ async function inputWithoutKeydown() {
   const { page } = game;
   await tapGrade(page, 1);
   await tapGame(page);
-  const text = await page.locator(".ship").first().getAttribute("data-text");
-  const before = await progress(page);
+  const ship = await page.locator(".ship").first().elementHandle();
+  const text = await ship.getAttribute("data-text");
+  const before = await countedNow(page);
   await page.keyboard.insertText(text);
-  await page.waitForTimeout(150);
-  check(await page.locator(`.ship[data-text="${text}"]`).count() === 0, `tablet: typing "${text}" through the input event destroys its ship`);
-  check(await progress(page) === before + 1, `tablet: the ship destroyed by the input event counts exactly once (${before} -> ${await progress(page)})`);
+  check(await gone(ship), `tablet: typing "${text}" through the input event destroys its ship`);
+  check(await countsOnce(page, before), `tablet: the ship destroyed by the input event counts exactly once (from ${before.count})`);
   await close(game, "tablet input event");
 }
 
@@ -141,7 +157,7 @@ async function keydownPlusInput() {
   const { page } = game;
   await tapGrade(page, 2); // level 1 words are two-letter syllables
   await tapGame(page);
-  const ship = page.locator('.ship[data-kind="ship"]').first();
+  const ship = await page.locator(normalShips).first().elementHandle();
   const text = await ship.getAttribute("data-text");
   const first = text[0];
   await page.evaluate((key) => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })), first);
@@ -150,12 +166,13 @@ async function keydownPlusInput() {
   const typed = await ship.getAttribute("data-typed");
   check(typed === "1", `tablet: one character from keydown plus input is typed once ("${text}" typed ${typed})`);
   await page.keyboard.insertText(text.slice(1));
-  await page.waitForTimeout(150);
-  check(await page.locator(`.ship[data-text="${text}"]`).count() === 0, `tablet: the rest of "${text}" typed through input finishes it`);
+  check(await gone(ship), `tablet: the rest of "${text}" typed through input finishes it`);
   await close(game, "tablet keydown plus input");
 }
 
 // S2: accented letters and ñ arrive through the composition/input path.
+// The target is one specific ship element, so a second ship carrying the same
+// word (or a word spawn of the same pool) can never make the check pass or fail.
 async function accentedLetters() {
   const game = await openGame("juegos/teclado.html");
   const { page } = game;
@@ -163,22 +180,64 @@ async function accentedLetters() {
   await tapGame(page);
   let target = null;
   for (let attempt = 0; attempt < 40 && !target; attempt++) {
-    const ship = page.locator('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="laser"]').first();
+    const ship = page.locator(normalShips).first();
     if (!(await ship.count())) { await page.waitForTimeout(100); continue; }
-    const text = await ship.getAttribute("data-text");
-    if (/[áéíóúñü]/i.test(text)) { target = text; break; }
+    const handle = await ship.elementHandle();
+    const text = await handle.getAttribute("data-text");
+    if (/[áéíóúñü]/i.test(text)) { target = { handle, text }; break; }
+    // Clear the way with an ordinary word so the accented one can arrive.
     await page.keyboard.insertText(text);
-    await page.waitForTimeout(150);
+    await gone(handle);
   }
-  check(target !== null, `tablet: an accented word shows up to type (${target})`);
+  check(target !== null, `tablet: an accented word shows up to type (${target?.text})`);
   if (target) {
-    const before = await progress(page);
-    await page.keyboard.insertText(target);
-    await page.waitForTimeout(150);
-    check(await page.locator(`.ship[data-text="${target}"]`).count() === 0, `tablet: typing "${target}" through the input event destroys it`);
-    check(await progress(page) === before + 1, "tablet: the accented word counts exactly once");
+    const before = await countedNow(page);
+    await page.keyboard.insertText(target.text);
+    check(await gone(target.handle), `tablet: typing "${target.text}" through the input event destroys that ship`);
+    check(await countsOnce(page, before), "tablet: the accented word counts exactly once");
   }
   await close(game, "tablet accents");
+}
+
+// S2/R3: Android's Back button hides the soft keyboard while the hidden field
+// keeps the focus. The child must see the tap target again, and a tap must ask
+// for a fresh focus, which is what makes the keyboard come back.
+async function keyboardDismissal() {
+  const game = await openGame("juegos/teclado.html");
+  const { page } = game;
+  await tapGrade(page, 1);
+  await tapGame(page);
+  check(await catcherFocused(page), "tablet R3: the tap leaves the hidden field focused, ready to type");
+  await page.evaluate(() => {
+    window.__focusCount = 0;
+    document.querySelector(".key-catcher").addEventListener("focus", () => { window.__focusCount++; });
+  });
+  const viewportHeight = (height) => page.evaluate((h) => {
+    const view = window.visualViewport;
+    Object.defineProperty(view, "height", { configurable: true, get: () => h });
+    Object.defineProperty(view, "offsetTop", { configurable: true, get: () => 0 });
+    view.dispatchEvent(new Event("resize"));
+  }, height);
+  await viewportHeight(600); // the soft keyboard opens
+  await page.waitForTimeout(120);
+  check(!(await page.locator("#keyboard-hint").isVisible()), "tablet R3: no tap target while the keyboard is open");
+  await viewportHeight(1024); // Android Back: the keyboard closes, the focus stays
+  await page.waitForTimeout(120);
+  check(await catcherFocused(page), "tablet R3: the hidden field keeps the focus after the keyboard is hidden");
+  check(await page.locator("#keyboard-hint").isVisible(), "tablet R3: hiding the keyboard while focused shows the tap target again");
+  const before = await page.evaluate(() => window.__focusCount);
+  await tapGame(page);
+  const after = await page.evaluate(() => window.__focusCount);
+  check(await catcherFocused(page), "tablet R3: a tap on the play area asks for the keyboard again");
+  check(after > before, `tablet R3: the tap focuses the field again, it does not just keep it (${before} -> ${after} focus events)`);
+  check(!(await page.locator("#keyboard-hint").isVisible()), "tablet R3: the tap target hides once the keyboard is asked for");
+  await page.evaluate(() => {
+    const view = window.visualViewport;
+    delete view.height;
+    delete view.offsetTop;
+    view.dispatchEvent(new Event("resize"));
+  });
+  await close(game, "tablet keyboard dismissal");
 }
 
 // S2: the on-screen keyboard shrinks the visible viewport. Cannon, shield and
@@ -256,6 +315,7 @@ async function desktopUnchanged() {
   await inputWithoutKeydown();
   await keydownPlusInput();
   await accentedLetters();
+  await keyboardDismissal();
   await keyboardShrinksPlayArea();
   await desktopUnchanged();
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);

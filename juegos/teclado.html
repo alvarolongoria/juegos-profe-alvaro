@@ -494,6 +494,13 @@
 
       window.addEventListener("resize", () => alive.forEach(place));
 
+      // S2/R3: the tablet's soft keyboard is tracked apart from the field focus.
+      // Android can hide the keyboard (its Back button) with the field still
+      // focused, so the focus alone does not mean the child can type.
+      let touchOnly = false;
+      let softKeyboardOpen = false;
+      let keyboardDismissed = false;
+
       // S2: the tablet's on-screen keyboard shrinks the visible viewport instead
       // of the layout viewport. The gap it leaves at the bottom is published as
       // --keyboard-inset, so the cannon, the shield and the ground stay visible.
@@ -503,7 +510,19 @@
         return Math.max(0, Math.round(innerHeight - view.offsetTop - view.height));
       }
       function fitToKeyboard() {
-        document.documentElement.style.setProperty("--keyboard-inset", `${keyboardInset()}px`);
+        const inset = keyboardInset();
+        document.documentElement.style.setProperty("--keyboard-inset", `${inset}px`);
+        // R3: the visible area growing back to full size means the keyboard was
+        // hidden. If the field kept the focus, the child can no longer type, so
+        // the tap target has to come back.
+        if (touchOnly) {
+          const open = inset > 40;
+          if (open !== softKeyboardOpen) {
+            softKeyboardOpen = open;
+            keyboardDismissed = !open && catcherFocused();
+            updateTypingHint();
+          }
+        }
         if (playing) alive.forEach(place);
       }
       // Without visualViewport nothing changes: --keyboard-inset stays 0px.
@@ -1017,45 +1036,60 @@
       // S2: a computer or a Chromebook has a physical keyboard, so the focus is
       // held for the child as before. A tablet opens its own keyboard only when
       // the child taps, and a closed keyboard never reopens by itself.
-      const touchOnly = matchMedia("(pointer: coarse)").matches;
+      touchOnly = matchMedia("(pointer: coarse)").matches;
       const keyboardHint = document.createElement("button");
       keyboardHint.type = "button";
       keyboardHint.id = "keyboard-hint";
       keyboardHint.textContent = "Toca aquí para escribir ⌨️";
       document.body.appendChild(keyboardHint);
-      const catcherFocused = () => document.activeElement === catcher;
+      function catcherFocused() { return document.activeElement === catcher; }
+      // R3: typing works only with the field focused *and* the keyboard open.
+      function typingReady() { return catcherFocused() && !keyboardDismissed; }
       function updateTypingHint() {
-        keyboardHint.classList.toggle("show", touchOnly && playing && !catcherFocused());
+        keyboardHint.classList.toggle("show", touchOnly && playing && !typingReady());
       }
       const holdFocus = () => { if (playing && !catcherFocused()) catcher.focus({ preventScroll: true }); };
+      // R3: Android shows the soft keyboard again only for a new focus inside the
+      // tap, so the field is blurred and focused again whenever the child asks.
+      function openKeyboard() {
+        keyboardDismissed = false;
+        if (catcherFocused()) catcher.blur();
+        catcher.focus({ preventScroll: true });
+        updateTypingHint();
+      }
       // A new level: a tablet shows the tap target instead of stealing the
       // focus, which would reopen the keyboard on its own.
       function requestTyping() {
-        if (touchOnly) updateTypingHint();
-        else holdFocus();
+        if (!touchOnly) return holdFocus();
+        if (softKeyboardOpen) keyboardDismissed = false;
+        updateTypingHint();
       }
       if (touchOnly) {
         catcher.addEventListener("focus", updateTypingHint);
-        catcher.addEventListener("blur", () => setTimeout(updateTypingHint));
-        keyboardHint.addEventListener("click", (event) => { event.preventDefault(); holdFocus(); });
-        // Any tap on the game (the sky, a ship, the play area) opens the
-        // keyboard, inside the gesture the tablet trusts.
-        const openKeyboard = (event) => {
+        catcher.addEventListener("blur", () => {
+          keyboardDismissed = false;
+          setTimeout(updateTypingHint);
+        });
+        keyboardHint.addEventListener("click", (event) => {
+          event.preventDefault();
+          if (playing) openKeyboard();
+        });
+        // Any tap on the game (the sky, a ship, the play area) opens the keyboard.
+        const tapPlayArea = (event) => {
           if (!playing) return;
           // The tap that starts or restarts a level belongs to its overlay, not
           // to the play area: the new level shows the tap target instead.
           if (keyboardHint.contains(event.target) || event.target.closest?.(".overlay")) return;
-          holdFocus();
+          openKeyboard();
         };
-        document.addEventListener("pointerdown", openKeyboard);
-        document.addEventListener("pointerup", openKeyboard);
-        document.addEventListener("click", openKeyboard);
+        document.addEventListener("pointerdown", tapPlayArea);
         // A tap also synthesises a mousedown, whose own focus handling would
-        // close the keyboard again a moment after it opened.
+        // close the keyboard again a moment after it opened. Cancel that, and
+        // open the keyboard here only when the press had no pointer event.
         document.addEventListener("mousedown", (event) => {
           if (!playing) return;
           event.preventDefault();
-          openKeyboard(event);
+          if (!catcherFocused()) tapPlayArea(event);
         });
       } else {
         catcher.addEventListener("blur", () => setTimeout(holdFocus));
