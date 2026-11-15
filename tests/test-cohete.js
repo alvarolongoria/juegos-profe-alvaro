@@ -1,5 +1,34 @@
 // Real keyboard input; the public state only helps time a hop, never collects anything.
+const path = require("path");
+const os = require("os");
+const { chromium } = require("playwright-core");
 const { openGame, pressPlay, check, finish } = require("./helpers");
+
+const ROOT = "file://" + path.resolve(__dirname, "..");
+const EXECUTABLE =
+  process.env.CHROME_PATH ||
+  path.join(os.homedir(), ".cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell");
+
+// helpers.js is read only, so a tablet page (touch enabled) is opened here.
+async function touchGame(file) {
+  const browser = await chromium.launch({ executablePath: EXECUTABLE });
+  const context = await browser.newContext({ viewport: { width: 768, height: 1024 }, hasTouch: true });
+  const page = await context.newPage();
+  const errors = [];
+  const external = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  page.on("request", (r) => !r.url().startsWith("file://") && external.push(r.url()));
+  await page.goto(`${ROOT}/${file}`);
+  return { browser, page, errors, external };
+}
+
+// A real finger tap in the middle of the element. Coordinates are used because
+// the game keys pulse, so Playwright would wait forever for a stable element.
+async function tapOn(page, selector) {
+  const box = await page.locator(selector).first().boundingBox();
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+}
 
 // Reads only what the page already publishes: where the rocket is, where the
 // flying things are, and the speed of the level.
@@ -62,7 +91,72 @@ async function flyLevel(page, timeoutMs) {
   return null;
 }
 
+// S1 + S3: on a tablet there is no physical keyboard, so the drawn ENTER and
+// SPACE keys must be tappable and act exactly like the physical key.
+async function touchChecks() {
+  const game = await touchGame("juegos/cohete.html");
+  const { page } = game;
+  try {
+    await pressPlay(page);
+    const state = () => page.locator("#world").getAttribute("data-state");
+    const hops = async () => Number(await page.locator("#rocket").getAttribute("data-hops"));
+    const height = async () => Number(await page.locator("#rocket").getAttribute("data-height"));
+    check((await state()) === "ready", "touch: the rocket waits on the pad");
+
+    // A mouse stays keyboard only: clicking the drawn keys never presses them.
+    await page.locator("#enter-key").click({ force: true });
+    check((await state()) === "ready", "mouse: clicking the drawn ENTER key never launches");
+    await page.locator("#space-key").click({ force: true });
+    check((await state()) === "ready", "mouse: clicking the drawn SPACE key changes nothing");
+    check(!(await page.locator("#space-key").evaluate((el) => el.classList.contains("hint"))), "mouse: clicking never flashes the key hint");
+    check(!(await page.locator("#enter-key").evaluate((el) => el.classList.contains("hint"))), "mouse: clicking ENTER never flashes a hint");
+
+    // Tapping SPACE before ENTER is the same mistake as pressing it.
+    await tapOn(page, "#space-key");
+    check((await state()) === "ready", "touch: tapping SPACE before ENTER does not launch");
+    check(await page.locator("#enter-key").evaluate((el) => el.classList.contains("hint")), "touch: tapping SPACE early hints the key to press");
+
+    await tapOn(page, "#enter-key");
+    check((await state()) === "flying", "touch: tapping ENTER starts the flight");
+    check(await page.locator("#pad").evaluate((el) => el.hidden), "touch: tapping ENTER hides the launch pad");
+
+    const beforeTap = await hops();
+    await tapOn(page, "#space-key");
+    check((await hops()) === beforeTap + 1, "touch: tapping SPACE counts one hop");
+    await page.waitForTimeout(150);
+    check((await height()) > 0, "touch: tapping SPACE lifts the rocket");
+
+    // While flying, a mouse click on the drawn key still does nothing.
+    const heldHops = await hops();
+    await page.locator("#space-key").click({ force: true });
+    check((await hops()) === heldHops, "mouse: clicking the drawn SPACE key never hops while flying");
+
+    // A pen stylus counts as touch too (a real pen cannot be emulated, so the
+    // pointer event is dispatched with the same shape the browser sends).
+    await page.evaluate(() => {
+      const keyEl = document.querySelector("#space-key");
+      keyEl.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "pen", bubbles: true, cancelable: true }));
+    });
+    check((await hops()) === heldHops + 1, "pen: tapping SPACE counts one hop");
+
+    const keyStyle = await page.locator("#space-key").evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { touch: style.touchAction, select: style.userSelect };
+    });
+    check(keyStyle.touch !== "auto", `touch: the drawn keys never double-tap zoom (${keyStyle.touch})`);
+    check(keyStyle.select === "none", `touch: the drawn keys cannot select text (${keyStyle.select})`);
+    check(game.errors.length === 0, `touch: no page errors (${game.errors.join(" | ")})`);
+    check(game.external.length === 0, `touch: no external requests (${game.external.join(", ")})`);
+  } catch (error) {
+    console.error(error);
+    process.exitCode = 1;
+  } finally {
+    await game.browser.close();
+  }
+}
+
 (async () => {
+  await touchChecks();
   let game;
   try {
     game = await openGame("juegos/cohete.html");

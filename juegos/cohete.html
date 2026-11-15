@@ -31,7 +31,7 @@
       @keyframes blink { 50% { opacity: 0.25; } }
       .star, .hazard { position: absolute; width: 60px; height: 60px; }
       .hazard { width: 64px; height: 64px; }
-      .key { position: fixed; bottom: 24px; height: 85px; background: #fff; color: #1e293b; border: 5px solid #cbd5e1; border-radius: 18px; box-shadow: 0 8px #64748b; display: flex; justify-content: center; align-items: center; font-size: 32px; font-weight: bold; }
+      .key { position: fixed; bottom: 24px; height: 85px; background: #fff; color: #1e293b; border: 5px solid #cbd5e1; border-radius: 18px; box-shadow: 0 8px #64748b; display: flex; justify-content: center; align-items: center; font-size: 32px; font-weight: bold; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
       #enter-key { left: calc(50% - 250px); width: 180px; }
       #space-key { left: calc(50% - 35px); width: 300px; }
       #space-key::after { content: ''; width: 75%; height: 15px; border: solid #475569; border-width: 0 4px 4px; }
@@ -319,17 +319,17 @@
         pad.hidden = false;
         state('ready');
       }
-      window.addEventListener('keydown', e => {
-        if (e.code === 'Space' || e.key === 'Enter') e.preventDefault();
-        if (e.repeat) return;
+      // One place for the key logic: the physical keyboard and a finger on the
+      // drawn keys both end up here, so a tap can never behave differently.
+      function press(key, code) {
         const now = world.dataset.state;
-        if (now === 'ready' && e.key === 'Enter') {
+        if (now === 'ready' && key === 'Enter') {
           state('flying');
           pad.hidden = true;
           cooldown = 0;
           Juegos.sound.click();
           spawn(nextKind());
-        } else if (now === 'flying' && e.code === 'Space') {
+        } else if (now === 'flying' && code === 'Space') {
           // A hop from the ground, extra gas in the air. Holding the key is one push only,
           // because auto-repeated keydowns are ignored above.
           velocity = height === 0 ? JUMP : Math.min(MAX_RISE_SPEED, Math.max(velocity, 0) + THRUST);
@@ -340,7 +340,24 @@
           Juegos.sound.oops();
           flash(now === 'ready' ? enterKey : spaceKey, 'hint');
         }
+      }
+      window.addEventListener('keydown', e => {
+        if (e.code === 'Space' || e.key === 'Enter') e.preventDefault();
+        if (e.repeat) return;
+        press(e.key, e.code);
       });
+      // A tablet has no physical keyboard, so a finger on the drawn key is that key.
+      // A mouse is untouched: pointer events from it are ignored and the physical
+      // keyboard stays the only input, exactly as before.
+      function tappable(keyEl, key, code) {
+        keyEl.addEventListener('pointerdown', event => {
+          if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+          event.preventDefault();
+          press(key, code);
+        });
+      }
+      tappable(enterKey, 'Enter', 'Enter');
+      tappable(spaceKey, ' ', 'Space');
       function loop(time) {
         const dt = Math.min((time - lastTime) / 1000, 0.04);
         lastTime = time;

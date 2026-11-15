@@ -1,7 +1,102 @@
 // Piano: physical keys only, Spanish letters, forgiving input and four levels.
+const path = require("path");
+const os = require("os");
+const { chromium } = require("playwright-core");
 const { openGame, pressPlay, check, finish } = require("./helpers");
 
+const ROOT = "file://" + path.resolve(__dirname, "..");
+const EXECUTABLE =
+  process.env.CHROME_PATH ||
+  path.join(os.homedir(), ".cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell");
+
+// helpers.js is read only, so a tablet page (touch enabled) is opened here.
+async function touchGame(file) {
+  const browser = await chromium.launch({ executablePath: EXECUTABLE });
+  const context = await browser.newContext({ viewport: { width: 768, height: 1024 }, hasTouch: true });
+  const page = await context.newPage();
+  const errors = [];
+  const external = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  page.on("request", (r) => !r.url().startsWith("file://") && external.push(r.url()));
+  await page.goto(`${ROOT}/${file}`);
+  return { browser, page, errors, external };
+}
+
+// A real finger tap in the middle of the element. Coordinates are used because
+// the lit key pulses, so Playwright would wait forever for a stable element.
+async function tapOn(page, selector) {
+  const box = await page.locator(selector).first().boundingBox();
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+// S1 + S3: a tablet has no physical keyboard, so the drawn keys must be tappable.
+async function touchChecks() {
+  const game = await touchGame("juegos/piano.html");
+  const { page } = game;
+  try {
+    await pressPlay(page);
+    const target = () => page.locator("#target").textContent();
+    const score = () => page.locator(".progress span.on").count();
+    const first = await target();
+
+    // Fingers are wider than a mouse pointer: every key must be easy to hit.
+    const sizes = await page.$$eval(".key", (keys) => keys.map((key) => {
+      const box = key.getBoundingClientRect();
+      return { width: Math.round(box.width), height: Math.round(box.height) };
+    }));
+    check(sizes.every((size) => size.width >= 44), `touch: every drawn key is at least 44px wide (min ${Math.min(...sizes.map((s) => s.width))})`);
+    check(sizes.every((size) => size.height >= 44), `touch: every drawn key is at least 44px tall (min ${Math.min(...sizes.map((s) => s.height))})`);
+
+    // Tapping a wrong key is the same mistake as pressing it.
+    await tapOn(page, '[data-key="B"]');
+    check((await score()) === 0, "touch: a wrong key never scores");
+    check(await page.locator('[data-key="B"]').evaluate((el) => el.classList.contains("wrong")), "touch: the tapped wrong key flashes");
+    check((await page.locator("#feedback").textContent()) === "↺", "touch: a wrong tap shows the retry signal");
+    check(!(await page.locator("#keyboard-hint").isVisible()), "touch: no physical-keyboard hint on a tap");
+
+    // Tapping the lit key counts exactly like the physical key.
+    await tapOn(page, `[data-key="${first}"]`);
+    check((await score()) === 1, "touch: tapping the lit key counts");
+    check((await page.locator("#feedback").textContent()) === "✓", "touch: a correct tap shows the success signal");
+    check(!(await page.locator("#keyboard-hint").isVisible()), "touch: a correct tap keeps the hint away");
+    check((await target()) !== first, "touch: the target moves after a correct tap");
+
+    // A mouse is unchanged: the drawn keyboard is only a guide there.
+    const second = await target();
+    await page.locator(`[data-key="${second}"]`).click({ force: true });
+    check((await score()) === 1, "mouse: clicking the lit key still never scores");
+    check(await page.locator("#keyboard-hint").isVisible(), "mouse: clicking still shows the physical-keyboard hint");
+    check((await target()) === second, "mouse: the click hint preserves the target");
+
+    // A pen stylus counts as touch too (a real pen cannot be emulated, so the
+    // pointer event is dispatched with the same shape the browser sends).
+    const third = await target();
+    await page.evaluate((key) => {
+      const cap = document.querySelector(`[data-key="${key}"]`);
+      cap.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "pen", bubbles: true, cancelable: true }));
+    }, third);
+    check((await score()) === 2, "pen: tapping the lit key counts");
+    check(!(await page.locator("#keyboard-hint").isVisible()), "pen: no physical-keyboard hint on a pen tap");
+
+    const keyStyle = await page.locator(`[data-key="${second}"]`).evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { touch: style.touchAction, select: style.userSelect };
+    });
+    check(keyStyle.touch !== "auto", `touch: the drawn keys never double-tap zoom (${keyStyle.touch})`);
+    check(keyStyle.select === "none", `touch: the drawn keys cannot select text (${keyStyle.select})`);
+    check(game.errors.length === 0, `touch: no page errors (${game.errors.join(" | ")})`);
+    check(game.external.length === 0, `touch: no external requests (${game.external.join(", ")})`);
+  } catch (error) {
+    console.error(error);
+    process.exitCode = 1;
+  } finally {
+    await game.browser.close();
+  }
+}
+
 (async () => {
+  await touchChecks();
   const game = await openGame("juegos/piano.html");
   const { page } = game;
   const target = () => page.locator("#target").textContent();
