@@ -60,6 +60,34 @@ function readState(page) {
   });
 }
 
+// Hazard kinds come out of the shared pick(), which draws from Math.random, and a
+// level only spawns while it is flying: the rocket that stands still on the pad
+// ends up losing the level, and the game then waits on the pad spawning nothing.
+// A fixed random value makes "which hazard comes next" identical on every run;
+// 0.99 always takes the last kind of the list, the UFO in level two and the ship
+// in level three, which is exactly what the two checks below are about.
+async function seedRandom(page, value = 0.99) {
+  await page.addInitScript((fixed) => { Math.random = () => fixed; }, value);
+  await page.reload();
+}
+
+// Waits for a hazard of the given kind while keeping the level flying, so that
+// neither a long run of other hazards nor a lost level can freeze the wait: a
+// level that is not flying spawns nothing at all.
+async function waitForHazard(page, kind, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let seen = "nothing";
+  while (Date.now() < deadline) {
+    if (await page.locator(`.hazard[data-kind="${kind}"]`).count()) return "spawned";
+    const state = await page.locator("#world").getAttribute("data-state");
+    seen = `${state} state with ${await page.locator(".hazard").count()} other hazards`;
+    if (state === "ready") await page.keyboard.press("Enter");
+    else if (state === "result") await page.click(".overlay .play-btn", { force: true }).catch(() => {});
+    await page.waitForTimeout(200);
+  }
+  return `never appeared (last seen: ${seen})`;
+}
+
 // Plays like a child: hop when something is about to arrive, stay on the ground
 // while a UFO passes over. A child's timing is a hop ahead of the contact.
 async function flyLevel(page, timeoutMs) {
@@ -161,6 +189,9 @@ async function touchChecks() {
   try {
     game = await openGame("juegos/cohete.html");
     const { page } = game;
+
+    // Every hazard kind below is then the same on every run.
+    await seedRandom(page);
 
     await pressPlay(page);
     check((await page.locator("#world").getAttribute("data-state")) === "ready", "the start screen leaves the rocket on the pad");
@@ -268,8 +299,8 @@ async function touchChecks() {
     await page.keyboard.down("Space");
     check(Number(await page.locator("#rocket").getAttribute("data-hops")) === hopsHeld + 1, "holding SPACE gives one push, not a hover");
     await page.keyboard.up("Space");
-    await page.waitForSelector('.hazard[data-kind="ufo"]', { timeout: 30000 });
-    check(true, "level two adds UFOs");
+    const ufo = await waitForHazard(page, "ufo");
+    check(ufo === "spawned", `level two adds UFOs (${ufo})`);
     check(await page.evaluate(() => window.scrollY === 0), "holding SPACE never scrolls the page");
 
     // S11: play on through levels two and three to see the progression grow.
@@ -279,8 +310,8 @@ async function touchChecks() {
     check((await goal()) === 9, `level three asks for nine stars (${await goal()})`);
     speeds.push(await speed());
     await page.keyboard.press("Enter");
-    await page.waitForSelector('.hazard[data-kind="ship"]', { timeout: 30000 });
-    check(true, "level three adds ships");
+    const ship = await waitForHazard(page, "ship");
+    check(ship === "spawned", `level three adds ships (${ship})`);
     const level3 = await flyLevel(page, 300000);
     check(level3 && level3.stars === 9 && level3.overlay.hasAward, `nine caught stars finish level three (${level3 && level3.stars})`);
     await pressPlay(page);
