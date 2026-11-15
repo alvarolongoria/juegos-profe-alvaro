@@ -10,7 +10,12 @@
       .space { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
       #sky { position: fixed; inset: 0; overflow: hidden; }
       #streak, #stats, #level-badge { position: fixed; z-index: 40; padding: 7px 12px; border: 2px solid #70c8d5; border-radius: 14px; background: #172943e8; color: #fff7e4; box-shadow: 0 0 14px #55cbd155; font-weight: bold; }
-      .key-catcher { position: fixed; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+      /* S2: invisible but focusable, and 16px big so iOS never zooms into it. */
+      .key-catcher { position: fixed; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; font-size: 16px; opacity: 0; pointer-events: none; }
+      /* S2: the tablet keyboard shrinks the visible area, so the shield, the
+         cannon and the ground follow --keyboard-inset (0px on a computer). */
+      #keyboard-hint { position: fixed; left: 50%; bottom: calc(var(--keyboard-inset, 0px) + 130px); transform: translateX(-50%); z-index: 60; display: none; padding: 16px 30px; border: 4px solid #24334b; border-radius: 22px; background: #ffcc58; color: #142341; font: inherit; font-size: clamp(22px, 3.4vw, 32px); font-weight: bold; box-shadow: 0 0 24px #ffcc5899; cursor: pointer; }
+      #keyboard-hint.show { display: block; }
       #streak { top: 112px; left: 16px; min-width: 105px; font-size: 19px; }
       #streak strong { display: block; color: #ffcc58; font-size: 28px; }
       #stats { top: 95px; right: 16px; font-size: 17px; line-height: 1.4; white-space: pre-line; text-align: right; }
@@ -26,7 +31,7 @@
       #shower-warning { position: fixed; top: 22%; left: 50%; transform: translate(-50%, -50%); z-index: 46; padding: 4px 22px; border: 4px solid #ffb052; border-radius: 18px; background: #2b1a10ee; color: #fff7e4; font-size: clamp(24px, 3vw, 40px); font-weight: bold; text-shadow: 0 0 12px #ffb052; opacity: 0; pointer-events: none; }
       #shower-warning.show { animation: laser-warning 2.2s ease-out forwards; }
       @keyframes laser-warning { 0% { opacity: 0; } 15%, 70% { opacity: 1; } 100% { opacity: 0; } }
-      #shield { position: fixed; left: 20%; bottom: 10px; width: 60%; height: 19px; z-index: 20; overflow: hidden; border: 3px solid #9fe3f0; border-radius: 20px; background: #142341; box-shadow: 0 0 12px #55cbd1; }
+      #shield { position: fixed; left: 20%; bottom: calc(10px + var(--keyboard-inset, 0px)); width: 60%; height: 19px; z-index: 20; overflow: hidden; border: 3px solid #9fe3f0; border-radius: 20px; background: #142341; box-shadow: 0 0 12px #55cbd1; }
       #shield-fill { height: 100%; width: 100%; background: #22c55e; transition: width .25s, background .25s; }
       #shield[data-state="warning"] #shield-fill { background: #f59e0b; }
       #shield[data-state="danger"] #shield-fill { background: #ef4444; }
@@ -46,7 +51,7 @@
       .ship.wrong .label { background: #c4b5ef; }
       .ship.frozen svg { filter: drop-shadow(0 0 8px #9fe3f0); }
       .ship.frozen .label { background: #b9eff8; border-color: #4c9ec2; }
-      #cannon { position: fixed; left: 50%; bottom: 0; width: 120px; height: 96px; margin-left: -60px; z-index: 30; pointer-events: none; }
+      #cannon { position: fixed; left: 50%; bottom: var(--keyboard-inset, 0px); width: 120px; height: 96px; margin-left: -60px; z-index: 30; pointer-events: none; }
       #cannon .barrel { transform-origin: 60px 70px; transition: transform 0.08s; }
       #cannon.impact { animation: cannon-hit .45s ease-out; filter: drop-shadow(0 0 18px #fb7d83); }
       .impact-ship { position: fixed; pointer-events: none; z-index: 29; }
@@ -489,8 +494,29 @@
 
       window.addEventListener("resize", () => alive.forEach(place));
 
+      // S2: the tablet's on-screen keyboard shrinks the visible viewport instead
+      // of the layout viewport. The gap it leaves at the bottom is published as
+      // --keyboard-inset, so the cannon, the shield and the ground stay visible.
+      function keyboardInset() {
+        const view = window.visualViewport;
+        if (!view) return 0;
+        return Math.max(0, Math.round(innerHeight - view.offsetTop - view.height));
+      }
+      function fitToKeyboard() {
+        document.documentElement.style.setProperty("--keyboard-inset", `${keyboardInset()}px`);
+        if (playing) alive.forEach(place);
+      }
+      // Without visualViewport nothing changes: --keyboard-inset stays 0px.
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", fitToKeyboard);
+        window.visualViewport.addEventListener("scroll", fitToKeyboard);
+        fitToKeyboard();
+      }
+
+      // The ground is the cannon's top edge, which already sits above the
+      // tablet keyboard, so ships land where the child can see them.
       function groundY() {
-        return innerHeight - document.getElementById("cannon").getBoundingClientRect().height;
+        return cannon.getBoundingClientRect().top;
       }
 
       function removeShip(ship) {
@@ -703,11 +729,12 @@
         bannerTimer = setTimeout(() => levelBanner.classList.remove("show"), warn ? 3500 : 1800);
         publish();
         playing = true;
-        holdFocus();
+        requestTyping();
       }
 
       async function loseLevel() {
         playing = false;
+        updateTypingHint();
         for (const ship of [...alive]) removeShip(ship);
         await Juegos.overlay("💔", `¡Inténtalo otra vez!\n${summary()}`);
         startLevel(true);
@@ -855,6 +882,7 @@
         trophies.award(level, { blocking: false });
         if (last) {
           playing = false;
+          updateTypingHint();
           for (const ship of [...alive]) removeShip(ship);
           const overlay = Juegos.overlay("🏆", summary());
           if (window.RANKING_URL) showRanking(document.querySelector(".overlay"), grade, stats.score, window.RANKING_URL);
@@ -936,33 +964,104 @@
         if (!playing || event.ctrlKey || event.metaKey) return;
         // Only keys that write one character count: not Shift, Enter, or the
         // dead ´ key, which waits for its vowel and then arrives as "á".
-        if (event.key.length !== 1) return;
+        if (event.key.length !== 1 || event.isComposing) return;
         // Handled here, so the hidden field below never receives it too.
         event.preventDefault();
-        if (!event.repeat) typeKey(event.key);
+        if (!event.repeat) {
+          rememberKeydown(event.key);
+          typeKey(event.key);
+        }
       });
 
       // A Chromebook composes ´ + vowel in its input method and delivers "á"
-      // only to a focused text field, never as a keydown. This invisible field
-      // keeps the focus during play and passes that composed text to the game.
+      // only to a focused text field, never as a keydown. A tablet's on-screen
+      // keyboard instead sends the typed text as input events. This invisible
+      // field receives both paths and passes each character to the game once.
       const catcher = document.createElement("input");
       catcher.className = "key-catcher";
       catcher.setAttribute("aria-hidden", "true");
       catcher.tabIndex = -1;
-      for (const [name, value] of [["autocomplete", "off"], ["autocapitalize", "off"], ["autocorrect", "off"], ["spellcheck", "false"]]) catcher.setAttribute(name, value);
+      // S2: a plain text keyboard, no autocorrection, no capitalising.
+      for (const [name, value] of [["autocomplete", "off"], ["autocapitalize", "off"], ["autocorrect", "off"], ["spellcheck", "false"], ["inputmode", "text"], ["enterkeyhint", "done"]]) catcher.setAttribute(name, value);
       document.body.appendChild(catcher);
+
+      // S2: a soft keyboard can send the keydown and the input event for the
+      // same character. Remembering the keydown for a moment types it once.
+      const typedByKeydown = [];
+      function forgetOldKeydowns(now) {
+        while (typedByKeydown.length && now - typedByKeydown[0].at > 150) typedByKeydown.shift();
+      }
+      function rememberKeydown(ch) {
+        const now = performance.now();
+        forgetOldKeydowns(now);
+        typedByKeydown.push({ ch, at: now });
+      }
+      function typedOnce(ch) {
+        const now = performance.now();
+        forgetOldKeydowns(now);
+        const index = typedByKeydown.findIndex((entry) => entry.ch === ch);
+        if (index < 0) return false;
+        typedByKeydown.splice(index, 1);
+        return true;
+      }
+
       // Read the field, not the event: whichever event fires first takes the text.
       const takeComposed = () => {
         const text = catcher.value;
         catcher.value = "";
-        if (playing) for (const ch of text) typeKey(ch);
+        if (playing) for (const ch of text) if (!typedOnce(ch)) typeKey(ch);
       };
       catcher.addEventListener("compositionend", takeComposed);
       catcher.addEventListener("input", (event) => { if (!event.isComposing) takeComposed(); });
-      const holdFocus = () => { if (playing && document.activeElement !== catcher) catcher.focus({ preventScroll: true }); };
-      catcher.addEventListener("blur", () => setTimeout(holdFocus));
-      document.addEventListener("pointerup", holdFocus);
-      setInterval(holdFocus, 500);
+
+      // S2: a computer or a Chromebook has a physical keyboard, so the focus is
+      // held for the child as before. A tablet opens its own keyboard only when
+      // the child taps, and a closed keyboard never reopens by itself.
+      const touchOnly = matchMedia("(pointer: coarse)").matches;
+      const keyboardHint = document.createElement("button");
+      keyboardHint.type = "button";
+      keyboardHint.id = "keyboard-hint";
+      keyboardHint.textContent = "Toca aquí para escribir ⌨️";
+      document.body.appendChild(keyboardHint);
+      const catcherFocused = () => document.activeElement === catcher;
+      function updateTypingHint() {
+        keyboardHint.classList.toggle("show", touchOnly && playing && !catcherFocused());
+      }
+      const holdFocus = () => { if (playing && !catcherFocused()) catcher.focus({ preventScroll: true }); };
+      // A new level: a tablet shows the tap target instead of stealing the
+      // focus, which would reopen the keyboard on its own.
+      function requestTyping() {
+        if (touchOnly) updateTypingHint();
+        else holdFocus();
+      }
+      if (touchOnly) {
+        catcher.addEventListener("focus", updateTypingHint);
+        catcher.addEventListener("blur", () => setTimeout(updateTypingHint));
+        keyboardHint.addEventListener("click", (event) => { event.preventDefault(); holdFocus(); });
+        // Any tap on the game (the sky, a ship, the play area) opens the
+        // keyboard, inside the gesture the tablet trusts.
+        const openKeyboard = (event) => {
+          if (!playing) return;
+          // The tap that starts or restarts a level belongs to its overlay, not
+          // to the play area: the new level shows the tap target instead.
+          if (keyboardHint.contains(event.target) || event.target.closest?.(".overlay")) return;
+          holdFocus();
+        };
+        document.addEventListener("pointerdown", openKeyboard);
+        document.addEventListener("pointerup", openKeyboard);
+        document.addEventListener("click", openKeyboard);
+        // A tap also synthesises a mousedown, whose own focus handling would
+        // close the keyboard again a moment after it opened.
+        document.addEventListener("mousedown", (event) => {
+          if (!playing) return;
+          event.preventDefault();
+          openKeyboard(event);
+        });
+      } else {
+        catcher.addEventListener("blur", () => setTimeout(holdFocus));
+        document.addEventListener("pointerup", holdFocus);
+        setInterval(holdFocus, 500);
+      }
 
       function typeKey(key) {
         if (!alive.length) return;
