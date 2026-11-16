@@ -97,6 +97,8 @@ async function win(page, grade, checkEarly = false) {
 const response = (top = [], grade = 5) => ({ ok: true, grade, month: "2026-11", top });
 const reply = (route, body) => route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(body) });
 const noExceptions = (game, label) => check(game.pageErrors.length === 0, `${label}: no page exceptions (${game.pageErrors.join(" | ")})`);
+// S2: every save needs the class key the teacher wrote on the board.
+const fillKey = (ranking, key = "sol") => ranking.getByLabel("Clave de clase").fill(key);
 const pointsOnScreen = async (page) => Number((await page.locator("#stats").textContent()).match(/Puntos: (\d+)/)[1]);
 
 async function withoutUrl() {
@@ -147,8 +149,10 @@ async function saveAndSafety() {
     const score = await pointsOnScreen(page);
     check(/5º/.test(await ranking.innerText()) && (await ranking.innerText()).includes(String(score)) && await ranking.locator("select").count() === 2,
       "S11 the fixed grade and final score are shown with exactly two selects");
-    check(await ranking.locator("input, textarea, [contenteditable=true]").count() === 0,
-      "S11 no free-text field can collect a real name");
+    const keyField = ranking.getByLabel("Clave de clase");
+    check(await ranking.locator("input, textarea, [contenteditable=true]").count() === 1 && await keyField.count() === 1
+      && await keyField.getAttribute("name") === "key" && await keyField.getAttribute("autocomplete") === "off",
+      "S2 the only free-text field is the class key (the name still comes from the two lists)");
     check(requests.length === 0 && game.external.length === 0, "S11 configuring the URL does not contact the server before a button is used");
     await page.keyboard.press("Tab");
     await page.waitForTimeout(700);
@@ -168,6 +172,11 @@ async function saveAndSafety() {
     const save = ranking.getByRole("button", { name: "Guardar", exact: true });
     await page.keyboard.press("Tab");
     await page.waitForTimeout(700);
+    check(await keyField.evaluate((el) => document.activeElement === el), "S2 Tab reaches the key field after the adjective");
+    await page.keyboard.type("sol");
+    check(await keyField.inputValue() === "sol" && await page.locator(".ship").count() === 0, "S2 typing the key fills the field and shoots nothing");
+    await page.keyboard.press("Tab");
+    await page.waitForTimeout(700);
     check(await save.evaluate((el) => document.activeElement === el), "S11 Tab reaches Guardar without the key-catcher stealing focus");
     const request = page.waitForRequest((r) => r.url().startsWith("https://ranking.test/") && new URL(r.url()).searchParams.get("action") === "add");
     await page.keyboard.press("Enter");
@@ -182,7 +191,8 @@ async function saveAndSafety() {
     const adds = requests.filter((r) => r.url.searchParams.get("action") === "add");
     const params = adds[0]?.url.searchParams;
     check(adds.length === 1 && adds[0].method === "GET" && params.get("animal") === animal && params.get("adjective") === selectedAdjective
-      && params.get("grade") === "5" && params.get("points") === String(score) && [...params.keys()].sort().join(",") === "action,adjective,animal,grade,points",
+      && params.get("grade") === "5" && params.get("points") === String(score) && params.get("key") === "sol"
+      && [...params.keys()].sort().join(",") === "action,adjective,animal,grade,key,points",
       `S11 at most one add sends the selected invented name, fixed grade and final score (${adds.length} requests)`);
     const rows = ranking.locator("ol li");
     check(await rows.count() === 3 && await rows.nth(0).textContent() === `Lince Feliz — ${score + 100}`
@@ -216,6 +226,7 @@ async function failedSave(kind) {
     const present = await ranking.count() === 1;
     check(present, `S11 ${kind} error scenario has a ranking form`);
     if (!present) return;
+    await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("No se pudo guardar ahora. Inténtalo más tarde."), null, { polling: 100 });
     check((await ranking.innerText()).includes("No se pudo guardar ahora. Inténtalo más tarde."), `S11 ${kind} error shows the gentle save message`);
@@ -295,6 +306,7 @@ async function gradeOneAndRepeat() {
     const firstScore = await pointsOnScreen(page);
     check(firstScore > 0 && (await ranking.innerText()).includes(`Curso: 1º · Puntos: ${firstScore}`),
       "S11 1º sees the actual final score even though its ordinary summary omits points");
+    await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
     check(adds.length === 1 && adds[0].searchParams.get("grade") === "1" && adds[0].searchParams.get("points") === String(firstScore)
@@ -305,6 +317,7 @@ async function gradeOneAndRepeat() {
     check(replay.level === "3" && replay.finished && await ranking.count() === 1
       && !await ranking.getByRole("button", { name: "Guardar", exact: true }).isDisabled(), "S11 replaying level 4 creates a fresh chance to save");
     const secondScore = await pointsOnScreen(page);
+    await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
     check(adds.length === 2 && adds[1].searchParams.get("grade") === "1" && adds[1].searchParams.get("points") === String(secondScore),
@@ -338,6 +351,7 @@ async function failedView() {
       check(await view.isEnabled() && await ranking.getByRole("button", { name: "Guardar", exact: true }).isEnabled(),
         `S11 ${kind} viewing error is gentle and leaves both actions usable`);
     }
+    await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("Todavía no hay nadie este mes"), null, { polling: 100 });
     check(topCalls === 2, "S11 a failed view can be retried and does not prevent saving");
@@ -364,6 +378,7 @@ async function overlappingRequests() {
     const present = await ranking.count() === 1;
     check(present, "S11 overlapping view/save scenario has a ranking form");
     if (!present) return;
+    await fillKey(ranking);
     await ranking.getByRole("button", { name: "Ver ranking", exact: true }).click();
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelector("#ranking .ranking-saved"), null, { polling: 100 });
@@ -376,8 +391,57 @@ async function overlappingRequests() {
   }
 }
 
+// S1-S2: wrong or missing keys save nothing and let the child try again.
+async function keyErrors() {
+  const adds = [];
+  const game = await gameWithClock(async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("action") !== "add") return reply(route, response([], 1));
+    adds.push(url);
+    const key = url.searchParams.get("key");
+    if (key === "rayo") return reply(route, { ok: false, error: "wrong grade", keyGrade: 6 });
+    if (key !== "sol") return reply(route, { ok: false, error: "bad key" });
+    return reply(route, response([{ name: "Panda Feliz", points: 900, from: 1 }, { name: "Lobo Leal", points: 800 }], 1));
+  });
+  try {
+    const { page } = game;
+    await win(page, 1);
+    const ranking = page.locator("#ranking");
+    const present = await ranking.count() === 1;
+    check(present, "S2 key errors scenario has a ranking form");
+    if (!present) return;
+    const save = ranking.getByRole("button", { name: "Guardar", exact: true });
+    const key = ranking.getByLabel("Clave de clase");
+    const status = ranking.locator('[role="status"]');
+    await key.fill("   ");
+    await save.click();
+    check(await status.textContent() === "Escribe la clave de tu clase." && adds.length === 0 && await save.isEnabled(),
+      "S2 an empty key asks for it and contacts nobody");
+    for (const [typed, message, label] of [
+      ["patata", "Esa clave no es correcta. Pregúntasela a tu profe.", "a wrong key"],
+      ["rayo", "Con la clave de 6º no puedes entrar en el ranking de 1º.", "an older grade's key"],
+    ]) {
+      await key.fill(typed);
+      const before = adds.length;
+      await save.click();
+      await page.waitForFunction((text) => document.querySelector('#ranking [role="status"]')?.textContent === text, message, { polling: 100 });
+      check(adds.length === before + 1 && await save.isEnabled() && await ranking.locator("ol li").count() === 0,
+        `S2 ${label} shows «${message}» and lets the child try again`);
+    }
+    await key.fill("sol");
+    await save.click();
+    await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 2, null, { polling: 100 });
+    check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["Panda Feliz (de 1º) — 900", "Lobo Leal — 800"]),
+      "S1 an entry from a younger grade shows «(de Nº)» after the name");
+    check(adds.length === 3 && await save.isDisabled(), "S2 after the right key the score is saved once and Guardar stays off");
+    noExceptions(game, "S2 key errors");
+  } finally {
+    await game.browser.close();
+  }
+}
+
 (async () => {
-  for (const [label, run] of [["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
+  for (const [label, run] of [["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
     ["view errors", failedView], ["overlapping requests", overlappingRequests]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }

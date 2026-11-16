@@ -76,7 +76,8 @@
       #ranking p { margin: 4px 0; }
       #ranking form, #ranking .ranking-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: end; gap: 8px; }
       #ranking label { display: flex; flex-direction: column; gap: 2px; font-weight: bold; text-align: left; }
-      #ranking select, #ranking button { min-height: 38px; padding: 4px 10px; border: 2px solid #24334b; border-radius: 9px; background: white; color: #24334b; font: inherit; }
+      #ranking select, #ranking input, #ranking button { min-height: 38px; padding: 4px 10px; border: 2px solid #24334b; border-radius: 9px; background: white; color: #24334b; font: inherit; }
+      #ranking input { width: 8em; }
       #ranking button { background: #b9eff8; font-weight: bold; }
       #ranking button:disabled { opacity: .55; }
       #ranking ol { width: fit-content; max-width: 100%; max-height: 120px; overflow: auto; margin: 6px auto 0; padding-left: 32px; text-align: left; }
@@ -980,6 +981,18 @@
         }
         const animal = select("Animal", "animal", RANKING_ANIMALS);
         const adjective = select("Adjetivo", "adjective", RANKING_ADJECTIVES);
+        // S2: the class key the teacher writes on the board; it also tells the child's grade.
+        const keyLabel = document.createElement("label");
+        keyLabel.textContent = "Clave de clase";
+        const key = document.createElement("input");
+        key.type = "text";
+        key.name = "key";
+        key.maxLength = 20;
+        key.autocomplete = "off";
+        key.setAttribute("autocapitalize", "none");
+        key.spellcheck = false;
+        keyLabel.appendChild(key);
+        form.appendChild(keyLabel);
         const actions = document.createElement("div");
         actions.className = "ranking-actions";
         const save = document.createElement("button");
@@ -998,12 +1011,20 @@
         layer.insertBefore(section, layer.querySelector(".play-btn"));
 
         let submitted = false, saving = false, requestVersion = 0, saved = null;
+        // The server refused the key: nothing was saved, so the child may try again.
+        class KeyRefused extends Error {
+          constructor(text) { super(text); this.text = text; }
+        }
         async function request(params) {
           const url = new URL(rankingUrl, window.location.href);
-          for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+          for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
           const response = await fetch(url.toString());
           if (!response.ok) throw new Error("Ranking request failed");
           const result = await response.json();
+          if (result && result.ok === false && result.error === "bad key") throw new KeyRefused("Esa clave no es correcta. Pregúntasela a tu profe.");
+          if (result && result.ok === false && result.error === "wrong grade" && /^[1-6]$/.test(String(result.keyGrade))) {
+            throw new KeyRefused(`Con la clave de ${result.keyGrade}º no puedes entrar en el ranking de ${resultGrade}º.`);
+          }
           if (!result || result.ok !== true || !Array.isArray(result.top)) throw new Error("Ranking response failed");
           return result.top;
         }
@@ -1014,7 +1035,8 @@
           for (const entry of top) {
             const item = document.createElement("li");
             // Names come from the server: treat them as text, never markup.
-            item.textContent = `${entry.name} — ${entry.points}`;
+            const from = /^[1-6]$/.test(String(entry.from)) ? ` (de ${entry.from}º)` : "";
+            item.textContent = `${entry.name}${from} — ${entry.points}`;
             if (!highlighted && saved && entry.name === saved.name && entry.points === saved.points) {
               item.classList.add("ranking-saved");
               item.setAttribute("aria-label", `Tu puntuación: ${item.textContent}`);
@@ -1027,6 +1049,11 @@
           event.preventDefault();
           // Even a failed response may have followed a successful server write.
           if (submitted) return;
+          if (!key.value.trim()) {
+            message.textContent = "Escribe la clave de tu clase.";
+            key.focus();
+            return;
+          }
           submitted = true;
           saving = true;
           save.disabled = true;
@@ -1035,11 +1062,15 @@
           const name = `${animal.value} ${adjective.value}`;
           message.textContent = "Guardando…";
           try {
-            const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore });
+            const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim() });
             saved = { name, points: resultScore };
             if (version === requestVersion) render(top);
-          } catch {
-            if (version === requestVersion) message.textContent = "No se pudo guardar ahora. Inténtalo más tarde.";
+          } catch (error) {
+            if (error instanceof KeyRefused) {
+              submitted = false;
+              save.disabled = false;
+              message.textContent = error.text;
+            } else if (version === requestVersion) message.textContent = "No se pudo guardar ahora. Inténtalo más tarde.";
           } finally {
             saving = false;
             view.disabled = false;
