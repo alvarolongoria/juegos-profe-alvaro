@@ -313,6 +313,16 @@ function handEdits() {
     `S2 a key repeated in two grades is replaced in both and the rest stay (${JSON.stringify(after)})`);
   check(add(dup, { grade: "1", key: "lupa" }).error === "bad key" && dup.rows().length === 0, "S2 the repeated key no longer lets anyone in");
 
+  const hidden = load();
+  const kept1 = hidden.keys();
+  setRow(hidden, 1, "lupa");
+  setRow(hidden, 6, "lupa");
+  hidden.sheets.Claves.rows.push([6, "nubo", "2026-11"]); // a second 6º row hides the first
+  const reset = hidden.keys();
+  check(reset[1] !== "lupa" && reset[6] !== "lupa" && reset[6] !== "nubo" && [2, 3, 4, 5].every((g) => reset[g] === kept1[g])
+    && add(hidden, { grade: "1", key: "lupa" }).error === "bad key",
+    `S2 a key shared with any row of another grade is replaced, even behind a repeated grade (${JSON.stringify(reset)})`);
+
   const reordered = load();
   const kept = reordered.keys();
   const header = tabOf(reordered)[0];

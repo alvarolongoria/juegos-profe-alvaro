@@ -145,23 +145,26 @@ function newKey(avoid) {
 
 // The six keys of the current month. The tab may have been edited by hand:
 // a grade keeps its key only when it has one valid row of this month and no
-// other grade has the same key. Any other grade gets a new key, so on the first
+// other row of the tab has the same key. Any other grade gets a new key, so on the first
 // use of a new month all six change. Call only while holding the script lock.
 function currentKeys() {
   var month = currentMonth();
   var tab = sheetNamed(KEYS_SHEET, KEYS_HEADER);
   var rows = tab.getDataRange().getValues().slice(1);
-  var found = {}, seen = {}, avoid = [];
+  var found = {}, seen = {}, avoid = [], uses = {};
   for (var i = 0; i < rows.length; i++) {
     var grade = readGrade(rows[i][0]);
     var key = normalizeKey(rows[i][1]);
-    if (key) avoid.push(key);
+    // Count every row, so a repeated grade cannot hide a key shared with another.
+    if (key) {
+      avoid.push(key);
+      uses[key] = (uses[key] || 0) + 1;
+    }
     if (grade === null) continue;
     seen[grade] = (seen[grade] || 0) + 1;
     if (monthOf(rows[i][2]) === month && /^[a-z]{3,12}$/.test(key)) found[grade] = key;
   }
-  var keys = {}, uses = {};
-  for (var g in found) uses[found[g]] = (uses[found[g]] || 0) + 1;
+  var keys = {};
   var tidy = rows.length === GRADES.length;
   for (var n = 0; n < GRADES.length; n++) {
     var each = GRADES[n], kept = found[each];
