@@ -21,8 +21,9 @@
 //   action=keys&secret=...                      -> { month, keys: { "1": "sol", ... } }
 //   action=setkey&grade=6&key=cometa&secret=... -> changes one grade's key
 // The secret is the Script Property BOT_SECRET (Project Settings > Script
-// Properties). Never write it in this file: this file is public. Without that
-// property the protected requests are switched off.
+// Properties) or, without it, PRIVATE_BOT_SECRET from the private file that
+// ranking/deploy.sh adds. Never write it in this file: this file is public.
+// Without either one the protected requests are switched off.
 
 // The game shows exactly these words; anything else is refused.
 var ANIMALS = ["Tigre", "León", "Delfín", "Águila", "Lince", "Búho", "Zorro", "Koala",
@@ -82,6 +83,9 @@ function doPost(e) {
 
 function isBot(secret) {
   var expected = PropertiesService.getScriptProperties().getProperty("BOT_SECRET");
+  // ranking/deploy.sh may add a private file (Secreto.js) defining PRIVATE_BOT_SECRET:
+  // it exists only in the Apps Script project, never in this public repository.
+  if (!expected && typeof PRIVATE_BOT_SECRET === "string" && PRIVATE_BOT_SECRET.length >= 16) expected = PRIVATE_BOT_SECRET;
   if (!expected || typeof secret !== "string" || secret.length !== expected.length) return false;
   // Compare every character, so the answer time does not hint how much matched.
   var difference = 0;

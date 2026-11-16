@@ -217,6 +217,17 @@ function readKeys() {
     const text = run();
     check(JSON.parse(text).ok === false && !leaks(text), `S3 ${label} is refused without revealing any key`);
   }
+  const private_ = load(undefined, {}, {});
+  vm.runInContext('var PRIVATE_BOT_SECRET = "private-secret-1234";', private_.context);
+  check(private_.post({ action: "keys", secret: "private-secret-1234" }).ok === true && private_.post({ action: "keys", secret: SECRET }).ok === false,
+    "S3 without the property, the private file's PRIVATE_BOT_SECRET (pushed only to Google) opens the protected actions");
+  const both = load();
+  vm.runInContext('var PRIVATE_BOT_SECRET = "private-secret-1234";', both.context);
+  check(both.post({ action: "keys", secret: SECRET }).ok === true && both.post({ action: "keys", secret: "private-secret-1234" }).ok === false,
+    "S3 the BOT_SECRET property wins over the private file");
+  const short = load(undefined, {}, {});
+  vm.runInContext('var PRIVATE_BOT_SECRET = "abc";', short.context);
+  check(short.post({ action: "keys", secret: "abc" }).ok === false, "S3 a private secret shorter than 16 characters is ignored");
   const unset = load(undefined, {}, {});
   const open = unset.postRaw({ action: "keys", secret: "" }).text;
   check(JSON.parse(open).ok === false && JSON.parse(unset.postRaw({ action: "keys", secret: "null" }).text).ok === false,
