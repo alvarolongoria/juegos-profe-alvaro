@@ -482,6 +482,14 @@ async function keyboardCostsNoLives() {
   check(scrolled.ships.every((ship) => ship.bottom <= scrolled.ground), `tablet S5: every ship stays above the ground under a scrolled keyboard (${scrolled.ships.map((ship) => `${round(ship.bottom)} of ${round(scrolled.ground)}`).join(", ")})`);
   const scrolledDrift = fractionDrift(closed, scrolled);
   check(scrolledDrift <= 0.05, `tablet S5: a scrolled keyboard keeps every ship in place too (largest change ${scrolledDrift.toFixed(3)})`);
+  // S8 (T13): the scrolled page hides its top 120px, so a new ship appears
+  // below that, where the child can see it.
+  await page.evaluate(() => window.advanceFrames(800)); // past the settle pause
+  for (const ship of scrolled.ships) await page.keyboard.insertText(ship.text);
+  await page.evaluate(() => window.advanceFrames(200));
+  // Every ship in the sky was typed away, so the ones flying now are new.
+  const fresh = (await playState(page)).ships;
+  check(fresh.length > 0 && fresh.every((ship) => ship.top >= 120), `tablet S8: a new ship appears below the part a scrolled page hides (${list(fresh)})`);
   await closeKeyboardLikeIos(page);
   await close(game, "tablet keyboard and lives");
 }
@@ -738,6 +746,132 @@ async function pauseTimingAfterLongFrame() {
   await close(game, "tablet pause timing");
 }
 
+// S8 (T13, L-2026-11-16): real iPads and phones still lost every heart when the
+// keyboard opened, while the emulated keyboard above passed. A real browser can
+// move the ground in ways the visual viewport fake never shows: the layout
+// viewport itself shrinks (window resize, inset unchanged), the events arrive in
+// another order, or the sky left is shorter than a ship. Whatever moves the
+// ground, a ship lands only by flying down, never because the ground jumped.
+async function groundJumpCostsNoLives() {
+  const game = await openGame("juegos/teclado.html", { clock: true });
+  const { page } = game;
+  await tapGrade(page, 1);
+  await page.evaluate(() => window.advanceFrames(600));
+  await tapGame(page);
+  await page.evaluate(() => window.advanceFrames(20000));
+  const before = await playState(page);
+  check(before.hearts === "3" && before.ships.some((ship) => ship.bottom > 600),
+    `tablet S8: a ship flies low, below where the keyboard will end (${list(before.ships)}; hearts ${before.hearts})`);
+  // The layout viewport shrinks: innerHeight drops, visualViewport keeps no inset.
+  await page.setViewportSize({ width: 768, height: 560 });
+  await page.evaluate(() => window.advanceFrames(100));
+  const shrunk = await playState(page);
+  check(shrunk.ground < before.ground - 300, `tablet S8: the ground moved up with the smaller screen (${round(before.ground)} -> ${round(shrunk.ground)})`);
+  check(shrunk.hearts === "3", `tablet S8: a smaller screen costs no hearts (${shrunk.hearts} of 3)`);
+  check(!shrunk.over, "tablet S8: a smaller screen does not end the level");
+  check(shrunk.ships.length === before.ships.length, `tablet S8: no ship is swallowed when the screen shrinks (${before.ships.length} -> ${shrunk.ships.length})`);
+  check(shrunk.ships.every((ship) => ship.bottom <= shrunk.ground), `tablet S8: every ship stays above the new ground (${shrunk.ships.map((ship) => `${round(ship.bottom)} of ${round(shrunk.ground)}`).join(", ")})`);
+  await page.evaluate(() => window.advanceFrames(400));
+  const settled = await playState(page);
+  check(settled.hearts === "3", `tablet S8: the frames right after the jump cost no hearts either (${settled.hearts} of 3)`);
+  await close(game, "tablet ground jump");
+}
+
+// S8 (T13): a phone in portrait, its own keyboard open. The sky left between the
+// two-row header and the cannon is short, and opening the keyboard must still
+// cost nothing and leave every ship above the ground.
+// S8 (T13): iOS can scroll the page with the keyboard already open, hiding
+// more of the top while the ground stays put. The ships follow the visible
+// top too, so none is left in the hidden part.
+async function scrolledTopMovesShips() {
+  const game = await openGame("juegos/teclado.html", { clock: true });
+  const { page } = game;
+  await tapGrade(page, 1);
+  await page.evaluate(() => window.advanceFrames(600));
+  await tapGame(page);
+  await openKeyboardLikeIos(page, { height: 600 });
+  await page.evaluate(() => window.advanceFrames(1500));
+  const before = await playState(page);
+  check(before.ships.some((ship) => ship.top < 150), `tablet S8: a ship flies near the top before the page scrolls (${list(before.ships)})`);
+  // Same keyboard (same inset), the page scrolled 150px: the ground does not move.
+  await page.evaluate(() => {
+    const view = window.visualViewport;
+    Object.defineProperty(view, "height", { configurable: true, get: () => 600 - 150 });
+    Object.defineProperty(view, "offsetTop", { configurable: true, get: () => 150 });
+    view.dispatchEvent(new Event("scroll"));
+  });
+  await page.evaluate(() => window.advanceFrames(100));
+  const after = await playState(page);
+  check(Math.abs(after.ground - before.ground) <= 1, `tablet S8: the ground stays put while only the top scrolls (${round(before.ground)} -> ${round(after.ground)})`);
+  check(after.ships.length === before.ships.length && after.ships.every((ship) => ship.top >= 150),
+    `tablet S8: every ship moves below the hidden top (${list(after.ships)})`);
+  check(after.hearts === "3", `tablet S8: a scrolled top costs no hearts (${after.hearts} of 3)`);
+  await closeKeyboardLikeIos(page);
+  await close(game, "tablet scrolled top");
+}
+
+async function phoneKeyboardCostsNoLives() {
+  const browser = await chromium.launch({ executablePath: EXECUTABLE });
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(frameClock);
+  await page.goto(`${ROOT}/juegos/teclado.html`);
+  const game = { browser, page, errors };
+  await tapGrade(page, 1);
+  await page.evaluate(() => window.advanceFrames(600));
+  await tapGame(page);
+  await page.evaluate(() => window.advanceFrames(20000));
+  const before = await playState(page);
+  check(before.hearts === "3" && before.ships.length > 0, `phone S8: ships fly with three hearts before the keyboard (${list(before.ships)}; hearts ${before.hearts})`);
+  await openKeyboardLikeIos(page, { height: 300, steps: 6 });
+  await page.evaluate(() => window.advanceFrames(100));
+  const open = await playState(page);
+  check(open.hearts === "3", `phone S8: opening the phone keyboard costs no hearts (${open.hearts} of 3)`);
+  check(!open.over, "phone S8: opening the phone keyboard does not end the level");
+  check(open.ships.every((ship) => ship.bottom <= open.ground), `phone S8: every ship stays above the ground (${open.ships.map((ship) => `${round(ship.bottom)} of ${round(open.ground)}`).join(", ")})`);
+  await page.evaluate(() => window.advanceFrames(400));
+  const settled = await playState(page);
+  check(settled.hearts === "3", `phone S8: the frames right after the keyboard opens cost no hearts (${settled.hearts} of 3)`);
+  // Past the settle pause the ships still near the ground land as they would
+  // have, but a new ship gets a real sky to fly in: its words are typed away
+  // and the next one must start well above the cannon.
+  for (const ship of settled.ships) await page.keyboard.insertText(ship.text);
+  await page.evaluate(() => window.advanceFrames(1000));
+  const room = await page.evaluate(() => {
+    const ground = document.querySelector("#cannon").getBoundingClientRect().top;
+    const tops = [...document.querySelectorAll(".ship")].map((el) => el.getBoundingClientRect().top);
+    return { ground, highest: Math.min(...tops) };
+  });
+  check(room.ground - room.highest >= 150, `phone S8: there are at least 150px of sky over the cannon (${round(room.highest)} to ${round(room.ground)})`);
+  // That sky reaches over the header, so the words must be drawn on top of it.
+  const readable = await page.evaluate(() => [...document.querySelectorAll(".ship .label")].every((label) => {
+    const box = label.getBoundingClientRect();
+    const x = Math.min(innerWidth - 1, Math.max(0, box.left + box.width / 2));
+    const y = Math.min(innerHeight - 1, Math.max(0, box.top + box.height / 2));
+    return label.contains(document.elementFromPoint(x, y));
+  }));
+  check(readable, "phone S8: every word stays readable, drawn above the header");
+  await close(game, "phone keyboard and lives");
+}
+
+// S8 (T13): a ?debug=1 address shows the screen numbers the game measures, so a
+// real device can be photographed when something still goes wrong.
+async function debugReadout() {
+  const game = await openGame("juegos/teclado.html?debug=1", { clock: true });
+  const { page } = game;
+  await tapGrade(page, 1);
+  await page.evaluate(() => window.advanceFrames(600));
+  const text = await page.locator("#debug-readout").textContent().catch(() => "");
+  check(/inner \d+x\d+/.test(text) && /visual \d+x\d+/.test(text) && /ground \d+/.test(text),
+    `tablet S8: ?debug=1 shows the screen numbers (${JSON.stringify(text)})`);
+  await close(game, "debug readout");
+  const plain = await openGame("juegos/teclado.html", { clock: true });
+  check(await plain.page.locator("#debug-readout").count() === 0, "tablet S8: without ?debug=1 there is no readout");
+  await close(plain, "no debug readout");
+}
+
 (async () => {
   await tapToType();
   await inputWithoutKeydown();
@@ -748,6 +882,10 @@ async function pauseTimingAfterLongFrame() {
   await keyboardDismissal();
   await keyboardShrinksPlayArea();
   await keyboardCostsNoLives();
+  await groundJumpCostsNoLives();
+  await phoneKeyboardCostsNoLives();
+  await scrolledTopMovesShips();
+  await debugReadout();
   await shipsWaitForTyping();
   await pauseTimingAfterLongFrame();
   await desktopUnchanged();
