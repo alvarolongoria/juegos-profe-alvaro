@@ -810,6 +810,98 @@ async function scrolledTopMovesShips() {
   await close(game, "tablet scrolled top");
 }
 
+// S9 (T14, L-2026-11-16b): a real iPad in landscape (Chrome, 1180x688, with an
+// 80px strip under the toolbar even with no keyboard) lost every heart the
+// moment the keyboard opened: it left about 260px, less than one ship plus the
+// cannon, so each new ship was born on the ground. With too little sky the game
+// waits, costs nothing and asks for portrait; turned upright it plays again.
+async function ipadLandscapeWaits() {
+  const browser = await chromium.launch({ executablePath: EXECUTABLE });
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 1180, height: 688 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(frameClock);
+  await page.goto(`${ROOT}/juegos/teclado.html?debug=1`);
+  const game = { browser, page, errors };
+  // Chrome's strip: the visible area is 79px shorter with no keyboard at all.
+  await page.evaluate(() => {
+    const view = window.visualViewport;
+    Object.defineProperty(view, "height", { configurable: true, get: () => 609 });
+    view.dispatchEvent(new Event("resize"));
+  });
+  await tapGrade(page, 1);
+  await page.evaluate(() => window.advanceFrames(600));
+  const readout = () => page.evaluate(() => new Promise((done) => setTimeout(() => done(document.querySelector("#debug-readout").textContent), 300)));
+  check(/kb false/.test(await readout()), "ipad S9: Chrome's strip under the toolbar is not taken for an open keyboard");
+  await tapGame(page);
+  await page.evaluate(() => window.advanceFrames(1500));
+  const before = await playState(page);
+  check(before.hearts === "3" && before.ships.length > 0, `ipad S9: a ship flies before the keyboard opens (${list(before.ships)}; hearts ${before.hearts})`);
+  await openKeyboardLikeIos(page, { height: 260 });
+  await page.evaluate(() => window.advanceFrames(5000));
+  const squeezed = await playState(page);
+  check(squeezed.hearts === "3", `ipad S9: a keyboard that leaves no room costs no hearts (${squeezed.hearts} of 3)`);
+  check(!squeezed.over, "ipad S9: a keyboard that leaves no room does not end the level");
+  check(await page.locator("#rotate-hint").isVisible(), "ipad S9: the game asks for the tablet in portrait");
+  check((await page.locator("#rotate-hint").textContent()).includes("Pon la tablet en vertical para jugar"), "ipad S9: the message says to turn the tablet upright");
+  check(!(await page.locator("#keyboard-hint").isVisible()), "ipad S9: the tap target does not show on top of the portrait message");
+  check(squeezed.ships.length === before.ships.length, `ipad S9: no new ship arrives while there is no room (${before.ships.length} -> ${squeezed.ships.length})`);
+  // iOS scrolls the page while the message shows: it stays in the visible part.
+  await page.evaluate(() => {
+    const view = window.visualViewport;
+    Object.defineProperty(view, "height", { configurable: true, get: () => 200 });
+    Object.defineProperty(view, "offsetTop", { configurable: true, get: () => 60 });
+    view.dispatchEvent(new Event("scroll"));
+  });
+  await page.evaluate(() => window.advanceFrames(100));
+  const hintTop = await page.locator("#rotate-hint").evaluate((el) => el.getBoundingClientRect().top);
+  check(hintTop >= 60, `ipad S9: the portrait message follows a scrolled page into view (top ${round(hintTop)})`);
+  // Typing a word away while there is no room brings no new ship into it.
+  for (const ship of squeezed.ships) await page.keyboard.insertText(ship.text);
+  await page.evaluate(() => window.advanceFrames(1000));
+  const typed = await playState(page);
+  check(typed.ships.length === 0 && typed.hearts === "3", `ipad S9: no ship is born into a sky with no room (${typed.ships.length} ships, hearts ${typed.hearts})`);
+  // Turned upright: the keyboard leaves plenty of sky and the game goes on.
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await openKeyboardLikeIos(page, { height: 780 });
+  await page.evaluate(() => window.advanceFrames(1500));
+  const upright = await playState(page);
+  check(!(await page.locator("#rotate-hint").isVisible()), "ipad S9: the portrait message goes away once the tablet is upright");
+  check(upright.hearts === "3" && !upright.over, `ipad S9: turning the tablet costs no hearts (${upright.hearts} of 3)`);
+  const moved = upright.ships.length > 0 && (await page.evaluate(() => window.advanceFrames(800)), (await playState(page)).ships.some((ship) => upright.ships.some((old) => old.text === ship.text && ship.top > old.top + 2)));
+  check(moved, "ipad S9: the ships fly again once the tablet is upright");
+  await close(game, "ipad landscape keyboard");
+}
+
+// S9 (T14): the keyboard can still be sliding away when the field loses the
+// focus. That half-closed keyboard must not become "closed", or the next real
+// keyboard would not count as open and Android Back would leave the game
+// running with no keyboard and no tap target.
+async function keyboardBaselineSurvivesQuickReopen() {
+  const game = await openGame("juegos/teclado.html?debug=1", { clock: true });
+  const { page } = game;
+  await tapGrade(page, 1);
+  await page.evaluate(() => window.advanceFrames(600));
+  await tapGame(page);
+  await openKeyboardLikeIos(page, { height: 600 }); // inset 424
+  const setHeight = (height) => page.evaluate((height) => {
+    const view = window.visualViewport;
+    Object.defineProperty(view, "height", { configurable: true, get: () => height });
+    view.dispatchEvent(new Event("resize"));
+  }, height);
+  await page.evaluate(() => document.querySelector(".key-catcher").blur());
+  await setHeight(610); // still closing: inset 414 with no focus
+  await tapGame(page); // tapped again before it finished
+  await setHeight(596); // open again: inset 428
+  const readout = () => page.evaluate(() => new Promise((done) => setTimeout(() => done(document.querySelector("#debug-readout").textContent), 300)));
+  check(/kb true/.test(await readout()), "tablet S9: a keyboard reopened while the last one was still closing counts as open");
+  await setHeight(1024); // Android Back: no keyboard, the field keeps the focus
+  await page.evaluate(() => window.advanceFrames(100));
+  check(await page.locator("#keyboard-hint").isVisible(), "tablet S9: hiding that keyboard brings the tap target back");
+  await close(game, "tablet quick keyboard reopen");
+}
+
 async function phoneKeyboardCostsNoLives() {
   const browser = await chromium.launch({ executablePath: EXECUTABLE });
   const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
@@ -885,6 +977,8 @@ async function debugReadout() {
   await groundJumpCostsNoLives();
   await phoneKeyboardCostsNoLives();
   await scrolledTopMovesShips();
+  await ipadLandscapeWaits();
+  await keyboardBaselineSurvivesQuickReopen();
   await debugReadout();
   await shipsWaitForTyping();
   await pauseTimingAfterLongFrame();

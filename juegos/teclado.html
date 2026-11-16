@@ -16,6 +16,10 @@
          cannon and the ground follow --keyboard-inset (0px on a computer). */
       #keyboard-hint { position: fixed; left: 50%; bottom: calc(var(--keyboard-inset, 0px) + 130px); transform: translateX(-50%); z-index: 60; display: none; padding: 16px 30px; border: 4px solid #24334b; border-radius: 22px; background: #ffcc58; color: #142341; font: inherit; font-size: clamp(22px, 3.4vw, 32px); font-weight: bold; box-shadow: 0 0 24px #ffcc5899; cursor: pointer; }
       #keyboard-hint.show { display: block; }
+      /* S9 (T14): an iPad in landscape with its keyboard open leaves no room for
+         a ship, so the game waits and asks for portrait instead. */
+      #rotate-hint { position: fixed; left: 50%; top: calc(var(--visible-top, 0px) + 12px); transform: translateX(-50%); z-index: 61; display: none; max-width: 90vw; padding: 10px 22px; border: 4px solid #24334b; border-radius: 22px; background: #ffcc58; color: #142341; font-size: clamp(20px, 3vw, 28px); font-weight: bold; text-align: center; box-shadow: 0 0 24px #ffcc5899; pointer-events: none; }
+      #rotate-hint.show { display: block; }
       #streak { top: 112px; left: 16px; min-width: 105px; font-size: 19px; }
       #streak strong { display: block; color: #ffcc58; font-size: 28px; }
       #stats { top: 95px; right: 16px; font-size: 17px; line-height: 1.4; white-space: pre-line; text-align: right; }
@@ -519,6 +523,7 @@
 
       window.addEventListener("resize", () => {
         spawnLineCache = null;
+        if (touchOnly && !catcherFocused()) insetBase = keyboardInset();
         followGround();
       });
 
@@ -533,6 +538,14 @@
       // after it moved (followGround below).
       const SETTLE_MS = 700;
       let groundSeen = null;
+      // S9 (T14): the inset seen without the field focused (no keyboard can be
+      // open then), the least extra inset that is a keyboard, and whether the
+      // sky left is too short for any ship to fly in.
+      let insetBase = Infinity;
+      const KEYBOARD_MIN = 100;
+      const MIN_PLAY_SKY = 180;
+      let skyTooSmall = false;
+      let visibleTopApplied = 0;
       let lineSeen = null;
       let settleUntil = 0;
 
@@ -603,7 +616,15 @@
         // hidden. If the field kept the focus, the child can no longer type, so
         // the tap target has to come back.
         if (touchOnly) {
-          const open = inset > 40;
+          // S9 (T14): Chrome on an iPad keeps a strip of about 80px under its
+          // toolbar even with no keyboard, so the inset the page shows before
+          // the field takes the focus is the baseline, and only a keyboard
+          // well above it counts as open.
+          // The smallest such inset wins, so a keyboard still sliding away
+          // after the field lost the focus never becomes the baseline. A new
+          // screen size (turning the tablet) starts the baseline over.
+          if (!catcherFocused()) insetBase = Math.min(insetBase, inset);
+          const open = inset - insetBase > KEYBOARD_MIN;
           if (open !== softKeyboardOpen) {
             softKeyboardOpen = open;
             keyboardDismissed = !open && catcherFocused();
@@ -631,6 +652,20 @@
         }
         groundSeen = ground;
         lineSeen = line;
+        // S9 (T14): less than MIN_PLAY_SKY between the visible top and the
+        // ground fits no ship, so the game waits (see typingPaused) and asks
+        // for the tablet in portrait, where the keyboard leaves room.
+        const top = window.visualViewport ? Math.max(0, Math.round(window.visualViewport.offsetTop)) : 0;
+        const tooSmall = touchOnly && ground - top - 8 < MIN_PLAY_SKY;
+        // The message follows the visible top, which iOS can scroll at any time.
+        if (top !== visibleTopApplied) {
+          visibleTopApplied = top;
+          document.documentElement.style.setProperty("--visible-top", `${top}px`);
+        }
+        if (tooSmall !== skyTooSmall) {
+          skyTooSmall = tooSmall;
+          updateTypingHint();
+        }
         document.body.classList.toggle("sky-tight", line < headerLine());
         return ground;
       }
@@ -742,7 +777,8 @@
           // An empty sky gets an object at once, even between scheduled spawns.
           const max = grade === 1 ? config.max : 2;
           const normalCount = alive.filter(isThreat).length;
-          if (playing && (alive.length === 0 || untilSpawn <= 0)) {
+          // S9 (T14): no new ship is born into a sky too short to hold it.
+          if (playing && !skyTooSmall && (alive.length === 0 || untilSpawn <= 0)) {
             // S5 (D3) + S7: level 3 sends a wave of three short words, which
             // borrows the next two spawn slots, so the pause keeps the average.
             const swarmRoom = destroyed + normalCount + SWARM_SIZE <= GOALS[level];
@@ -1213,10 +1249,19 @@
       // S5 (T6, D5): a tablet child can type only with the on-screen keyboard
       // open, so the ships pause while the tap target is showing. A computer or a
       // Chromebook always has a physical keyboard, so nothing pauses there.
-      function typingPaused() { return touchOnly && !typingReady(); }
+      function typingPaused() { return touchOnly && (!typingReady() || skyTooSmall); }
+      const rotateHint = document.createElement("div");
+      rotateHint.id = "rotate-hint";
+      rotateHint.setAttribute("role", "status");
+      rotateHint.textContent = "Pon la tablet en vertical para jugar 📱";
+      document.body.appendChild(rotateHint);
       function updateTypingHint() {
-        keyboardHint.classList.toggle("show", touchOnly && playing && !typingReady());
+        keyboardHint.classList.toggle("show", touchOnly && playing && !typingReady() && !skyTooSmall);
+        rotateHint.classList.toggle("show", touchOnly && playing && skyTooSmall);
       }
+      // S9 (T14): the first measure ran before the page knew it was a tablet,
+      // so the baseline inset (Chrome's strip on an iPad) is taken again now.
+      if (window.visualViewport) fitToKeyboard();
       const holdFocus = () => { if (playing && !catcherFocused()) catcher.focus({ preventScroll: true }); };
       // R3: Android shows the soft keyboard again only for a new focus inside the
       // tap, so the field is blurred and focused again whenever the child asks.
@@ -1338,7 +1383,7 @@
             `inner ${innerWidth}x${innerHeight} scrollY ${Math.round(scrollY)}`,
             view ? `visual ${Math.round(view.width)}x${Math.round(view.height)} top ${Math.round(view.offsetTop)}` : "visual none",
             `inset ${keyboardInsetApplied} ground ${Math.round(groundY())} line ${spawnLine()}`,
-            `touch ${touchOnly} focus ${catcherFocused()} kb ${softKeyboardOpen} paused ${typingPaused()}`,
+            `touch ${touchOnly} focus ${catcherFocused()} kb ${softKeyboardOpen} base ${insetBase} paused ${typingPaused()} small ${skyTooSmall}`,
             `hearts ${hearts} ships ${alive.length}`,
           ].join("\n");
         };
