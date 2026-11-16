@@ -31,11 +31,12 @@ var ANIMALS = ["Tigre", "León", "Delfín", "Águila", "Lince", "Búho", "Zorro"
 var ADJECTIVES = ["Veloz", "Valiente", "Feliz", "Audaz", "Genial", "Brillante", "Gigante",
   "Ágil", "Fuerte", "Alegre", "Leal", "Tenaz", "Imparable", "Increíble", "Elegante", "Sonriente"];
 
-// Short words without accents or ñ, easy to type for the youngest grades.
-var KEY_WORDS = ["sol", "luna", "mar", "nube", "pez", "gato", "flor", "rayo", "faro", "lago",
-  "pino", "oso", "rana", "coco", "kiwi", "mono", "loro", "vaca", "pato", "foca",
-  "tren", "barco", "globo", "copa", "lapiz", "mesa", "rosa", "trigo", "uva", "pera",
-  "limon", "nieve", "playa", "monte", "isla", "cielo", "fuego", "hoja", "roca", "selva"];
+// Generated keys are two easy syllables ("mipa", "tolu"): short to type for the
+// youngest grades, and with 5,625 possibilities too many to guess by trying.
+var KEY_CONSONANTS = "bcdfgjlmnprstvz";
+var KEY_VOWELS = "aeiou";
+// Syllable pairs a class should never see on the board.
+var BLOCKED_KEYS = ["caca", "culo", "pedo", "pene", "pito", "popo", "puta", "puto", "teta", "nazi", "cono", "mear", "mierda"];
 
 var SHEET = "Ranking";
 var HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno"];
@@ -129,30 +130,59 @@ function normalizeKey(value) {
     .replace(/[óòö]/g, "o").replace(/[úùü]/g, "u").replace(/ñ/g, "n");
 }
 
-// The six keys of the current month; on the first use of a month they change.
-// Call only while holding the script lock.
+function randomSyllable() {
+  return KEY_CONSONANTS.charAt(Math.floor(Math.random() * KEY_CONSONANTS.length))
+    + KEY_VOWELS.charAt(Math.floor(Math.random() * KEY_VOWELS.length));
+}
+
+// A new key that is not in use, not blocked and not any word already in the tab.
+function newKey(avoid) {
+  for (;;) {
+    var key = randomSyllable() + randomSyllable();
+    if (BLOCKED_KEYS.indexOf(key) < 0 && avoid.indexOf(key) < 0) return key;
+  }
+}
+
+// The six keys of the current month. The tab may have been edited by hand:
+// a grade keeps its key only when it has one valid row of this month and no
+// other grade has the same key. Any other grade gets a new key, so on the first
+// use of a new month all six change. Call only while holding the script lock.
 function currentKeys() {
   var month = currentMonth();
   var tab = sheetNamed(KEYS_SHEET, KEYS_HEADER);
   var rows = tab.getDataRange().getValues().slice(1);
-  var keys = {}, stale = rows.length < GRADES.length, previous = [];
-  for (var i = 0; i < GRADES.length; i++) {
-    var row = rows[i] || [];
-    var key = normalizeKey(row[1]);
-    previous.push(key);
-    if (Number(row[0]) !== GRADES[i] || !key || monthOf(row[2]) !== month) stale = true;
-    keys[GRADES[i]] = key;
+  var found = {}, seen = {}, avoid = [];
+  for (var i = 0; i < rows.length; i++) {
+    var grade = readGrade(rows[i][0]);
+    var key = normalizeKey(rows[i][1]);
+    if (key) avoid.push(key);
+    if (grade === null) continue;
+    seen[grade] = (seen[grade] || 0) + 1;
+    if (monthOf(rows[i][2]) === month && /^[a-z]{3,12}$/.test(key)) found[grade] = key;
   }
-  if (!stale) return keys;
-  var pool = KEY_WORDS.filter(function (word) { return previous.indexOf(word) < 0; });
+  var keys = {}, uses = {};
+  for (var g in found) uses[found[g]] = (uses[found[g]] || 0) + 1;
+  var tidy = rows.length === GRADES.length;
+  for (var n = 0; n < GRADES.length; n++) {
+    var each = GRADES[n], kept = found[each];
+    if (seen[each] === 1 && kept && uses[kept] === 1) keys[each] = kept;
+    var row = rows[n] || [];
+    if (!keys[each] || Number(row[0]) !== each || row[1] !== kept) tidy = false;
+  }
+  if (tidy) return keys;
   var values = [];
-  for (var g = 0; g < GRADES.length; g++) {
-    var word = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-    keys[GRADES[g]] = word;
+  for (var m = 0; m < GRADES.length; m++) {
+    var level = GRADES[m];
+    if (!keys[level]) {
+      keys[level] = newKey(avoid);
+      avoid.push(keys[level]);
+    }
     // The apostrophe keeps the month as text, so Sheets never turns it into a date.
-    values.push([GRADES[g], word, "'" + month]);
+    values.push([level, keys[level], "'" + month]);
   }
   tab.getRange(2, 1, GRADES.length, 3).setValues(values);
+  // Extra rows (notes, a 7th grade, repeated grades) are removed, never trusted.
+  if (rows.length > GRADES.length) tab.deleteRows(GRADES.length + 2, rows.length - GRADES.length);
   return keys;
 }
 
@@ -162,6 +192,8 @@ function withLock(work) {
   try {
     return work();
   } finally {
+    // Write everything to the sheet before another request may read it.
+    SpreadsheetApp.flush();
     lock.releaseLock();
   }
 }

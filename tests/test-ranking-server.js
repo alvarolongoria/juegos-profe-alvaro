@@ -23,6 +23,7 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
       rows,
       appendRow: (row) => { rows.push(row.map(cell)); },
       getLastRow: () => rows.length,
+      deleteRows: (start, count) => { rows.splice(start - 1, count); },
       getDataRange: () => ({ getValues: () => rows.map((r) => r.slice()) }),
       // 1-based like Sheets: a block of cells that can be read or written.
       getRange: (row, column, height = 1, width = 1) => ({
@@ -41,6 +42,7 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
     return sheet;
   };
   const cache = new Map();
+  const events = [];
   const fixed = new Date(now).getTime();
   class FixedDate extends Date {
     constructor(...args) { super(...(args.length ? args : [fixed])); }
@@ -49,6 +51,7 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
   const context = {
     Date: FixedDate,
     SpreadsheetApp: {
+      flush: () => events.push("flush"),
       getActiveSpreadsheet: () => ({
         getSheetByName: (name) => sheets[name] || null,
         insertSheet: (name) => makeSheet(name),
@@ -62,7 +65,7 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
         return out;
       },
     },
-    LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
+    LockService: { getScriptLock: () => ({ waitLock: () => events.push("lock"), releaseLock: () => events.push("release") }) },
     CacheService: {
       getScriptCache: () => ({
         get: (key) => (cache.has(key) ? cache.get(key) : null),
@@ -88,7 +91,7 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
   const post = (parameter) => JSON.parse(postRaw(parameter).text);
   const rows = () => (sheets.Ranking ? sheets.Ranking.rows.slice(1) : []);
   const keys = () => post({ action: "keys", secret: SECRET }).keys;
-  return { context, get, json, post, postRaw, rows, sheets, keys };
+  return { context, get, json, post, postRaw, rows, sheets, keys, events };
 }
 
 const SECRET = "test-secret-123456";
@@ -111,6 +114,7 @@ function lists() {
 function saveValid() {
   const game = load();
   const result = add(game, {});
+  check(game.events.join() === "lock,flush,release,lock,flush,release", `S2 every locked write is flushed to the sheet before the lock is released (${game.events.join()})`);
   check(result.ok === true, `S11 a valid score is saved (${JSON.stringify(result)})`);
   const [row] = game.rows();
   check(game.rows().length === 1 && row[1] === "2026-11" && row[2] === 5 && row[3] === "Tigre Veloz" && row[4] === 1200 && row[5] === 5,
@@ -195,6 +199,10 @@ function readKeys() {
     `S3 the bot gets the keys of the six grades and their month (${JSON.stringify(result)})`);
   check(values.length === 6 && new Set(values).size === 6 && values.every((k) => /^[a-z]{3,12}$/.test(k)),
     `S4 the six keys are different short lowercase words (${values.join(",")})`);
+  const seen = new Set();
+  for (let i = 0; i < 40; i++) Object.values(load().keys()).forEach((k) => seen.add(k));
+  check([...seen].every((k) => /^([bcdfgjlmnprstvz][aeiou]){2}$/.test(k)) && seen.size > 120,
+    `S2 generated keys are two easy syllables from a large space, not a short public list (${seen.size} different in 40 months)`);
   check(sheetKeys(game).map((r) => `${r[0]}|${r[1]}|${r[2]}`).join(";") === values.map((k, i) => `${i + 1}|${k}|2026-11`).join(";")
     && game.sheets.Claves.rows[0].join("|") === "Curso|Clave|Mes", "S3 the keys live in the «Claves» tab of the sheet (Curso|Clave|Mes)");
   check(JSON.stringify(game.post({ action: "keys", secret: SECRET }).keys) === JSON.stringify(result.keys), "S4 the keys stay the same within the month");
@@ -283,12 +291,50 @@ function keyRules() {
   check(JSON.stringify(top) === JSON.stringify([{ name: "Panda Veloz", points: 900, from: 1 }, { name: "Lobo Veloz", points: 800 }]),
     `S1 the top marks only entries from a younger grade with «from» (${JSON.stringify(top)})`);
   const typed = load();
-  typed.post({ action: "setkey", secret: SECRET, grade: "3", key: "sol" });
-  check(add(typed, { grade: "3", key: "  SÓL " }).ok === true, "S2 the child's key is read trimmed, without caring about capitals or accents");
+  const setSol = typed.post({ action: "setkey", secret: SECRET, grade: "3", key: "sol" });
+  check(setSol.ok === true && add(typed, { grade: "3", key: "  SÓL " }).ok === true, "S2 the child's key is read trimmed, without caring about capitals or accents");
   const brake = load();
   let refused = 0;
   for (let i = 0; i < 30; i++) if (add(brake, { key: `mal${"abcdefghijklmnopqrstuvwxyz"[i % 26]}` }).error === "bad key") refused++;
   check(refused === 30 && add(brake, {}).error === "too many" && brake.rows().length === 0, "S2 wrong keys count towards the per-minute brake, so guessing is slow");
+}
+
+// S2-S3: the teacher may edit «Claves» by hand; a broken tab never lets a key cross grades.
+function handEdits() {
+  const tabOf = (game) => game.sheets.Claves.rows;
+  const setRow = (game, grade, key) => { tabOf(game)[tabOf(game).findIndex((r) => r[0] === grade)] = [grade, key, "2026-11"]; };
+
+  const dup = load();
+  const before = dup.keys();
+  setRow(dup, 1, "lupa");
+  setRow(dup, 6, "lupa");
+  const after = dup.keys();
+  check(after[1] !== "lupa" && after[6] !== "lupa" && after[1] !== after[6] && [2, 3, 4, 5].every((g) => after[g] === before[g]),
+    `S2 a key repeated in two grades is replaced in both and the rest stay (${JSON.stringify(after)})`);
+  check(add(dup, { grade: "1", key: "lupa" }).error === "bad key" && dup.rows().length === 0, "S2 the repeated key no longer lets anyone in");
+
+  const reordered = load();
+  const kept = reordered.keys();
+  const header = tabOf(reordered)[0];
+  reordered.sheets.Claves.rows.splice(0, 7, header, ...tabOf(reordered).slice(1).reverse());
+  check(JSON.stringify(reordered.keys()) === JSON.stringify(kept), "S3 rows in another order keep every grade's key");
+
+  const missing = load();
+  const old = missing.keys();
+  missing.sheets.Claves.rows.splice(3, 1); // the teacher deletes 3º's row
+  const fixed = missing.keys();
+  check(fixed[3] && fixed[3] !== old[3] && [1, 2, 4, 5, 6].every((g) => fixed[g] === old[g])
+    && tabOf(missing).slice(1).map((r) => r[0]).join() === "1,2,3,4,5,6",
+    `S3 a deleted row gets a new key only for its grade and the tab is tidy again (${JSON.stringify(fixed)})`);
+
+  const junk = load();
+  const same = junk.keys();
+  setRow(junk, 2, "a1");
+  junk.sheets.Claves.rows.push([9, "mesa", "2026-11"], ["", "nota de la profe", ""]);
+  const cleaned = junk.keys();
+  check(cleaned[2] !== "a1" && /^[a-z]{3,12}$/.test(cleaned[2]) && [1, 3, 4, 5, 6].every((g) => cleaned[g] === same[g])
+    && tabOf(junk).length === 7 && add(junk, { grade: "6", key: "mesa" }).error === "bad key",
+    `S3 an invalid key is replaced and extra rows are removed and never accepted (${tabOf(junk).length} rows)`);
 }
 
 // Sheets created before the key keep working and gain the new column title.
@@ -317,6 +363,7 @@ readKeys();
 setKey();
 monthlyRotation();
 keyRules();
+handEdits();
 oldSheet();
 console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 process.exit(failCount ? 1 : 0);
