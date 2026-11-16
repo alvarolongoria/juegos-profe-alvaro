@@ -1143,12 +1143,24 @@
         target.flash = setTimeout(() => target.el.classList.remove("wrong"), 300);
       }
 
+      // These marks can be reported as a printable key or as a composition on
+      // their own, but they are not finished letters of the game.
+      const deadMark = (ch) => "´`¨^".includes(ch);
       window.addEventListener("keydown", (event) => {
         if (!playing || event.ctrlKey || event.metaKey) return;
-        // Only keys that write one character count: not Shift, Enter, or the
-        // dead ´ key, which waits for its vowel and then arrives as "á".
+        if (!touchOnly) {
+          // Let the OS compose into the focused field, even when keydown says
+          // "a" rather than "Dead" or "Process". A held key must not insert
+          // repeated characters, including while a composition is in progress.
+          if (event.repeat) { event.preventDefault(); return; }
+          if (catcherFocused() || event.key.length !== 1 || event.isComposing || deadMark(event.key)) return;
+          // If focus was lost, preserve the old physical-keyboard fallback.
+          event.preventDefault();
+          typeKey(event.key);
+          return;
+        }
+        // Keep the tablet keydown/input deduplication unchanged.
         if (event.key.length !== 1 || event.isComposing) return;
-        // Handled here, so the hidden field below never receives it too.
         event.preventDefault();
         if (!event.repeat) {
           rememberKeydown(event.key);
@@ -1217,7 +1229,12 @@
         // loses it would start the word again. It is emptied when it ends.
         handedOver = composing ? (deleted ? handedOver : text) : "";
         if (!composing) catcher.value = "";
-        if (playing) for (const ch of fresh) if (!typedOnce(ch)) typeKey(ch);
+        if (playing) for (const ch of fresh) {
+          // On desktop the field is the sole source while focused: a dead mark
+          // alone is not a letter, and there is no keydown to deduplicate.
+          if (!touchOnly && deadMark(ch)) continue;
+          if (!touchOnly || !typedOnce(ch)) typeKey(ch);
+        }
       };
       catcher.addEventListener("compositionend", () => takeComposed());
       catcher.addEventListener("input", (event) => {
@@ -1375,8 +1392,10 @@
       if (new URLSearchParams(location.search).has("debug")) {
         const readout = document.createElement("pre");
         readout.id = "debug-readout";
-        readout.style.cssText = "position:fixed;left:4px;top:50%;z-index:99;margin:0;padding:4px 6px;background:#000c;color:#7f7;font:12px/1.3 monospace;pointer-events:none;";
+        readout.style.cssText = "position:fixed;left:4px;top:50%;transform:translateY(-50%);z-index:99;max-width:calc(100vw - 8px);margin:0;padding:4px 6px;background:#000c;color:#7f7;font:12px/1.3 monospace;white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none;";
         document.body.appendChild(readout);
+        const events = [];
+        const field = (value) => typeof value === "string" ? JSON.stringify(value.length > 24 ? `${value.slice(0, 24)}…` : value) : value ?? "—";
         const showNumbers = () => {
           const view = window.visualViewport;
           readout.textContent = [
@@ -1385,8 +1404,16 @@
             `inset ${keyboardInsetApplied} ground ${Math.round(groundY())} line ${spawnLine()}`,
             `touch ${touchOnly} focus ${catcherFocused()} kb ${softKeyboardOpen} base ${insetBase} paused ${typingPaused()} small ${skyTooSmall}`,
             `hearts ${hearts} ships ${alive.length}`,
+            ...events,
           ].join("\n");
         };
+        for (const type of ["keydown", "keyup", "compositionstart", "compositionupdate", "compositionend", "input"]) {
+          window.addEventListener(type, (event) => {
+            events.push(`event ${event.type} key=${field(event.key)} code=${field(event.code)} keyCode=${field(event.keyCode)} isComposing=${field(event.isComposing)} data=${field(event.data)} inputType=${field(event.inputType)}`);
+            if (events.length > 6) events.shift();
+            showNumbers();
+          }, true);
+        }
         showNumbers();
         setInterval(showNumbers, 250);
       }

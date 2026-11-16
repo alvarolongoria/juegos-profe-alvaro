@@ -45,16 +45,19 @@ async function chooseGrade(page, grade) {
 }
 
 async function finishWithClock(page) {
-  return page.evaluate(() => {
-    const level = document.body.dataset.level;
-    for (let i = 0; i < 3000 && !document.querySelector(".overlay") && document.body.dataset.level === level; i++) {
+  const level = await page.evaluate(() => document.body.dataset.level);
+  for (let i = 0; i < 3000; i++) {
+    const next = await page.evaluate(({ i, level }) => {
+      if (document.querySelector(".overlay") || document.body.dataset.level !== level) return { finished: true };
       window.randomValue = ((i * 37) % 99 + 0.5) / 100;
       window.advanceFrames(50);
-      const target = document.querySelector(".ship");
-      if (target) for (const key of target.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
-    }
-    return { level, finished: !!document.querySelector(".overlay") || document.body.dataset.level !== level };
-  });
+      return { text: document.querySelector(".ship")?.dataset.text };
+    }, { i, level });
+    if (next.finished) return { level, finished: true };
+    // Chromium inserts the text into the focused catcher and fires input.
+    if (next.text) await page.keyboard.insertText(next.text);
+  }
+  return { level, finished: await page.evaluate((level) => !!document.querySelector(".overlay") || document.body.dataset.level !== level, level) };
 }
 
 async function gameWithClock(handler) {
@@ -224,13 +227,10 @@ async function failedSave(kind) {
       `S11 ${kind} error still permits viewing the ranking without a duplicate save`);
     noExceptions(game, `S11 ${kind} error`);
     await page.locator(".overlay .play-btn").click({ force: true });
-    const resumed = await page.evaluate(() => {
-      window.advanceFrames(50);
-      const ship = document.querySelector(".ship");
-      if (!ship) return false;
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: ship.dataset.text[0], bubbles: true, cancelable: true }));
-      return document.body.dataset.level === "3" && (ship.dataset.typed === "1" || !ship.isConnected);
-    });
+    await page.evaluate(() => window.advanceFrames(50));
+    const ship = await page.locator(".ship").first().elementHandle();
+    if (ship) await page.keyboard.insertText((await ship.getAttribute("data-text"))[0]);
+    const resumed = !!ship && await page.evaluate((el) => document.body.dataset.level === "3" && (el.dataset.typed === "1" || !el.isConnected), ship);
     check(resumed, `S11 ${kind} error leaves the repeated level playable`);
   } finally {
     await game.browser.close();

@@ -1,5 +1,27 @@
 // Teclado naves: pick a grade, type the text a ship carries to shoot it.
-const { openGame, check, finish } = require("./helpers");
+const { openGame: openBrowser, check, finish } = require("./helpers");
+
+// Frame-clock checks run inside one page task, where synthetic keydown events
+// have no browser default action. Model that default by delivering their text
+// to the focused field unless the game cancels the keydown.
+function installSyntheticKeyboard() {
+  window.testKey = (key) => {
+    const field = document.querySelector(".key-catcher");
+    const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+    const target = document.activeElement === field ? field : window;
+    target.dispatchEvent(event);
+    if (!event.defaultPrevented && target === field && key.length === 1) {
+      field.value += key;
+      field.dispatchEvent(new InputEvent("input", { bubbles: true, data: key, inputType: "insertText" }));
+    }
+  };
+}
+async function openGame(file) {
+  const game = await openBrowser(file);
+  await game.page.addInitScript(installSyntheticKeyboard);
+  await game.page.evaluate(installSyntheticKeyboard);
+  return game;
+}
 
 // Several non-blocking trophy flights can overlap when a fast player finishes
 // consecutive levels, so wait for the whole set rather than a strict locator.
@@ -15,10 +37,9 @@ const log = console.log, error = console.error;
 console.log = (...args) => { if (String(args[0]).startsWith("ok: ")) okCount++; log(...args); };
 console.error = (...args) => { if (String(args[0]).startsWith("FAIL: ")) failCount++; error(...args); };
 
-// Playwright's key map lacks ñ and accented vowels, so dispatch the value the
-// browser delivers after a Spanish dead key (´ then a gives "á").
-const typeChar = (page, key) =>
-  page.evaluate((k) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })), key);
+// Playwright's key map lacks ñ and accented vowels; the frame-clock keyboard
+// supplies the value a focused field receives after the browser composes it.
+const typeChar = (page, key) => page.evaluate((k) => window.testKey(k), key);
 
 async function typeText(page, text) {
   for (const ch of text) await typeChar(page, ch);
@@ -100,6 +121,187 @@ async function chromebookAccents() {
   await finish(game);
 }
 
+// S10 (tablet task): exercise a focused desktop field with real browser input,
+// including the ChromeOS sequences that cannot be assumed from one keydown.
+async function chromebookDesktopS10() {
+  const game = await openGame("juegos/teclado.html?debug=1");
+  const { page } = game;
+  const cdp = await page.context().newCDPSession(page);
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installFrameClock(page);
+
+  async function start(index = null, stage = 1) {
+    await page.reload();
+    await chooseGrade(page, 6);
+    if (index === null || stage > 0) await page.evaluate(() => window.advanceFrames(50));
+    if (index !== null) {
+      for (let level = 0; level < stage; level++) {
+        const result = await finishWithClock(page);
+        if (!result.finished) throw new Error(`S10 could not finish 6º level ${level + 1}`);
+      }
+      await page.evaluate((seed) => { window.randomValue = seed; window.advanceFrames(50); }, (index + 0.1) / pools[6][stage].length);
+    }
+    await page.waitForFunction(() => document.activeElement === document.querySelector(".key-catcher"));
+    const target = await page.locator(normalShip).first().elementHandle();
+    if (!target) throw new Error("S10 could not find the target ship");
+    return { target, text: await target.getAttribute("data-text"), before: await score(page), stats: await vitals() };
+  }
+  async function vitals() {
+    const text = await page.locator("#stats").textContent();
+    return { hearts: await data(page, "hearts"), fallos: text.match(/Fallos: \d\/3/)?.[0], accuracy: text.match(/Precisión: .*?(?=\n|$)/)?.[0] };
+  }
+  async function finished(run, label) {
+    const after = await vitals();
+    check(!await run.target.evaluate((el) => el.isConnected) && await score(page) === run.before + 1, `Chromebook S10 ${label}: "${run.text}" is destroyed and counts once`);
+    check(after.hearts === run.stats.hearts && after.fallos === run.stats.fallos && after.accuracy === "Precisión: 100 %", `Chromebook S10 ${label}: no wrong key or lost heart (${JSON.stringify(run.stats)} -> ${JSON.stringify(after)})`);
+  }
+  // The key events are dispatched on the focused field; the IME and committed
+  // text come from Chromium itself. The vowel deliberately reports false for
+  // isComposing, as some ChromeOS keyboards do.
+  async function deadVowel(mark, vowel, committed) {
+    await page.evaluate((key) => document.querySelector(".key-catcher").dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })), "Dead");
+    await cdp.send("Input.imeSetComposition", { text: mark, selectionStart: 1, selectionEnd: 1 });
+    const raw = await page.evaluate((key) => {
+      const field = document.querySelector(".key-catcher");
+      const event = new KeyboardEvent("keydown", { key, code: `Key${key.toUpperCase()}`, keyCode: key.toUpperCase().charCodeAt(0), isComposing: false, bubbles: true, cancelable: true });
+      field.dispatchEvent(event);
+      return { prevented: event.defaultPrevented, typed: document.querySelector('.ship.locked')?.dataset.typed, stats: document.querySelector("#stats").textContent };
+    }, vowel);
+    await cdp.send("Input.insertText", { text: committed });
+    return raw;
+  }
+  async function typeRest(text) {
+    const vowels = { á: "a", é: "e", í: "i", ó: "o", ú: "u", ü: "u" };
+    for (const ch of text) {
+      if (vowels[ch]) await deadVowel(ch === "ü" ? "¨" : "´", vowels[ch], ch);
+      else await page.keyboard.type(ch);
+    }
+  }
+
+  const mode = await page.evaluate(() => ({ touch: matchMedia("(pointer: coarse)").matches }));
+  // A level is started below; the initial page is intentionally unfocused.
+  check(!mode.touch, "Chromebook S10 runs as a non-touch desktop");
+
+  let run = await start(3); // matemáticas
+  check(run.text === "matemáticas", `Chromebook S10 selected the accented word (${run.text})`);
+  const pos = run.text.indexOf("á");
+  await page.keyboard.type(run.text.slice(0, pos));
+  const raw = await deadVowel("´", "a", "á");
+  check(!raw.prevented && raw.typed === String(pos) && raw.stats.includes("Fallos: 0/3"), `Chromebook S10 dead + uncomposed a: the keydown is neither consumed nor typed (${JSON.stringify(raw)})`);
+  await page.keyboard.type(run.text.slice(pos + 1));
+  await finished(run, "dead + uncomposed a");
+
+  run = await start(3);
+  await page.keyboard.type(run.text.slice(0, pos));
+  await page.evaluate(() => {
+    window.s10Direct = null;
+    window.addEventListener("keydown", (event) => { if (event.key === "á") window.s10Direct = event.defaultPrevented; }, { once: true });
+  });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "á", code: "KeyA", windowsVirtualKeyCode: 65, text: "á", unmodifiedText: "á" });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "á", code: "KeyA", windowsVirtualKeyCode: 65 });
+  check(await page.evaluate(() => window.s10Direct) === false, "Chromebook S10 direct á keydown is left to the field");
+  await page.keyboard.type(run.text.slice(pos + 1));
+  await finished(run, "direct á");
+
+  run = await start(3);
+  await typeChromebook(page, cdp, run.text);
+  await finished(run, "existing Dead/Process IME sequence");
+
+  // Exercise all five accented vowels, including ú in a level-4 sentence.
+  for (const [stage, index, word, accent] of [[1, 0, "murciélago", "é"], [1, 2, "bolígrafo", "í"], [1, 4, "helicóptero", "ó"], [3, 11, "Me encanta la música.", "ú"]]) {
+    run = await start(index, stage);
+    check(run.text === word, `Chromebook S10 selected ${word} for ${accent} (${run.text})`);
+    await typeRest(run.text);
+    await finished(run, `dead key + ${accent}`);
+  }
+
+  run = await start(); // pingüino
+  check(run.text === "pingüino", `Chromebook S10 selected the diaeresis word (${run.text})`);
+  await typeRest(run.text);
+  await finished(run, "¨ + u gives ü");
+
+  run = await start();
+  await page.evaluate(() => {
+    window.s10Repeats = [];
+    window.addEventListener("keydown", (event) => { if (event.repeat) window.s10Repeats.push({ key: event.key, prevented: event.defaultPrevented }); });
+  });
+  await page.keyboard.down("p");
+  await page.keyboard.down("p");
+  await page.keyboard.up("p");
+  const repeats = await page.evaluate(() => window.s10Repeats);
+  check(await run.target.getAttribute("data-typed") === "1" && repeats.length === 1 && repeats[0].prevented, `Chromebook S10 held key advances once and blocks repeat (${JSON.stringify(repeats)})`);
+  await typeRest(run.text.slice(1));
+  await finished(run, "held key");
+
+  for (const mark of ["´", "`", "¨", "^"]) {
+    run = await start();
+    const result = await page.evaluate((key) => {
+      const field = document.querySelector(".key-catcher");
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true, cancelable: true }));
+      field.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+      field.value = key;
+      field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: key }));
+      field.value = key;
+      field.dispatchEvent(new InputEvent("input", { bubbles: true, data: key, inputType: "insertText" }));
+      return { typed: document.querySelector(".ship")?.dataset.typed, hearts: document.body.dataset.hearts, stats: document.querySelector("#stats").textContent };
+    }, mark);
+    check(result.typed === "0" && result.hearts === run.stats.hearts && result.stats.includes("Fallos: 0/3"), `Chromebook S10 dead mark ${JSON.stringify(mark)} alone never types or costs a heart (${JSON.stringify(result)})`);
+    await typeRest(run.text);
+    await finished(run, `dead mark ${JSON.stringify(mark)} then word`);
+  }
+
+  run = await start(3);
+  const fallback = await page.evaluate((text) => {
+    const field = document.querySelector(".key-catcher");
+    field.blur();
+    const prevented = [...text.slice(0, 3)].map((key) => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    for (const modifier of ["ctrlKey", "metaKey"]) window.dispatchEvent(new KeyboardEvent("keydown", { key: "#", [modifier]: true, bubbles: true, cancelable: true }));
+    for (const key of ["´", "`", "¨", "^"]) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    const typed = document.querySelector('.ship.locked')?.dataset.typed;
+    const stats = document.querySelector("#stats").textContent;
+    field.focus();
+    return { prevented, typed, stats };
+  }, run.text);
+  check(fallback.prevented.every(Boolean) && fallback.typed === "3" && fallback.stats.includes("Fallos: 0/3"), `Chromebook S10 blurred field uses keydown fallback and ignores Ctrl/Meta (${JSON.stringify(fallback)})`);
+  await typeRest(run.text.slice(3));
+  await finished(run, "blurred fallback");
+
+  run = await start(8, 0); // llave: the same letter across a focus change
+  check(run.text === "llave", `Chromebook S10 selected the repeated-letter word (${run.text})`);
+  await page.evaluate(() => {
+    const field = document.querySelector(".key-catcher");
+    field.blur();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+    field.focus();
+  });
+  await page.keyboard.type("lave");
+  await finished(run, "same letter after focus returns");
+
+  await start();
+  await page.evaluate(() => {
+    const field = document.querySelector(".key-catcher");
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", code: "ShiftLeft", keyCode: 16, bubbles: true }));
+    field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    field.dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data: "´" }));
+    field.dispatchEvent(new InputEvent("input", { bubbles: true, data: "´", inputType: "insertCompositionText", isComposing: true }));
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "a", code: "KeyA", keyCode: 65, bubbles: true, cancelable: true }));
+    field.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "á" }));
+    field.dispatchEvent(new InputEvent("input", { bubbles: true, data: "á", inputType: "insertText" }));
+  });
+  await page.waitForTimeout(300);
+  const debug = (await page.locator("#debug-readout").textContent()).split("\n").filter((line) => line.startsWith("event "));
+  check(debug.length === 6 && !debug.some((line) => line.includes("Shift")) && debug[0].includes("compositionstart") && debug[5].includes("input"), `Chromebook S10 debug keeps the six latest events in order (${JSON.stringify(debug)})`);
+  check(debug.some((line) => /keydown/.test(line) && /key="a"/.test(line) && /code="KeyA"/.test(line) && /keyCode=65/.test(line) && /isComposing=false/.test(line))
+    && debug.some((line) => /input/.test(line) && /data="´"/.test(line) && /inputType="insertCompositionText"/.test(line) && /isComposing=true/.test(line)),
+    `Chromebook S10 debug shows key, code, keyCode, composing, data and inputType (${JSON.stringify(debug)})`);
+  await finish(game);
+}
+
 // S2: in 6º every third wrong key costs a heart; 5º keeps only the broken streak.
 async function errorHearts() {
   for (const grade of [6, 5]) {
@@ -151,7 +353,7 @@ async function noTrapShips() {
           window.advanceFrames(50);
           for (const el of document.querySelectorAll(".ship")) kinds.add(el.dataset.kind);
           const target = document.querySelector(".ship");
-          if (target) for (const key of target.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+          if (target) for (const key of target.dataset.text) window.testKey(key);
         }
         const over = !!document.querySelector(".overlay") || document.body.dataset.level !== start;
         return { level: start, announced, kinds: [...kinds], over };
@@ -216,7 +418,7 @@ async function swarmsAndLaser() {
           break;
         }
         const low = ships.filter((el) => el.dataset.kind !== "laser").sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
-        if (low && low.getBoundingClientRect().bottom > innerHeight - 170) for (const key of low.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+        if (low && low.getBoundingClientRect().bottom > innerHeight - 170) for (const key of low.dataset.text) window.testKey(key);
       }
       out.kinds = [...kinds];
       return out;
@@ -240,7 +442,7 @@ async function swarmsAndLaser() {
       const laser = document.querySelector('.ship[data-kind="laser"]');
       if (!laser) return null;
       const text = laser.dataset.text;
-      const press = (key) => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      const press = (key) => window.testKey(key);
       const fallos = () => (document.querySelector("#stats").textContent.match(/Fallos: (\d)\/3/) || [])[1] ?? null;
       const hearts = () => document.body.dataset.hearts;
       const before = { hearts: hearts(), fallos: fallos() };
@@ -273,7 +475,7 @@ async function swarmsAndLaser() {
         out.found ||= lasers.length > 0;
         if (lasers.length) { out.text = lasers[0].dataset.text; out.art = lasers[0].querySelector("svg").innerHTML; }
         const low = [...document.querySelectorAll(".ship")].filter((el) => el.dataset.kind !== "laser").sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
-        if (low && low.getBoundingClientRect().bottom > innerHeight - 170) for (const key of low.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+        if (low && low.getBoundingClientRect().bottom > innerHeight - 170) for (const key of low.dataset.text) window.testKey(key);
       }
       return out;
     });
@@ -311,7 +513,7 @@ async function effectObjects() {
         // Empty the sky for the first frames, as a fast player would, then stop
         // so some ships are on screen when the next special objects arrive.
         const target = i < 8 && document.querySelector(enemies);
-        if (target) for (const key of target.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+        if (target) for (const key of target.dataset.text) window.testKey(key);
       }
       return spawns;
     }, { enemies, effects, seed });
@@ -349,7 +551,7 @@ async function meteorShower() {
       const early = await page.evaluate(() => window.meteorsSeen);
       check(early === 0, `S10 ${grade}º levels 1-3 send no meteors (${early})`);
       const run = await page.evaluate(({ shoot, count }) => {
-        const press = (key) => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+        const press = (key) => window.testKey(key);
         const notice = document.querySelector("#shower-warning");
         const score = () => Number(document.querySelector("#stats").textContent.match(/\d+/)?.[0] || 0);
         const out = { level: document.body.dataset.level, announced: "", meteors: [], shipsDuring: 0, heartsBefore: null, heartsAfter: null, scoreBefore: 0, scoreAfter: 0, resumed: false };
@@ -543,7 +745,7 @@ async function finishWithClock(page) {
       const target = document.querySelector(".ship");
       if (!target) continue;
       if (!target.dataset.kind || target.dataset.kind === "ship") seen.push(target.dataset.text);
-      for (const key of target.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      for (const key of target.dataset.text) window.testKey(key);
     }
     return { seen, finished: !!document.querySelector(".overlay") || document.body.dataset.level !== level };
   });
@@ -555,7 +757,7 @@ async function probeSpecial(page, random, grade = 2, hurt = false, want = null) 
   return page.evaluate(({ random, hurt, want }) => {
     window.randomValue = random;
     const step = window.advanceFrames;
-    const type = (el) => { for (const key of el.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); };
+    const type = (el) => { for (const key of el.dataset.text) window.testKey(key); };
     step(50);
     const first = document.querySelector(".ship");
     const firstKind = first?.dataset.kind || "ship";
@@ -596,7 +798,7 @@ async function calibrationAndSpecials() {
   const immediate = await page.evaluate(() => {
     window.advanceFrames(50);
     const first = document.querySelector(".ship");
-    for (const key of first.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+    for (const key of first.dataset.text) window.testKey(key);
     window.advanceFrames(50);
     return !!document.querySelector(".ship");
   });
@@ -655,7 +857,7 @@ async function calibrationAndSpecials() {
       const before = document.body.dataset.hearts;
       // Clear the enemy ships first, so only the object itself can cost a heart.
       for (const threat of [...document.querySelectorAll('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]')]) {
-        for (const key of threat.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+        for (const key of threat.dataset.text) window.testKey(key);
       }
       for (let i = 0; i < 800 && el.isConnected; i++) window.advanceFrames(50);
       return !el.isConnected && document.body.dataset.hearts === before;
@@ -710,14 +912,14 @@ async function calibrationAndSpecials() {
     const bonus = await page.evaluate(() => {
       const before = Number(document.querySelector("#stats").textContent.match(/\d+/)[0]);
       const el = document.querySelector('.ship[data-kind="heart"]');
-      for (const key of el.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+      for (const key of el.dataset.text) window.testKey(key);
       return { hearts: document.body.dataset.hearts, delta: Number(document.querySelector("#stats").textContent.match(/\d+/)[0]) - before };
     });
     check(bonus.hearts === "3" && bonus.delta > 40, "S10 heart at full health gives bonus points without exceeding three");
     await probeSpecial(page, found.heart, 2, true, "heart");
     const healing = await page.evaluate(() => {
       const before = document.body.dataset.hearts, el = document.querySelector('.ship[data-kind="heart"]');
-      if (el) for (const key of el.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+      if (el) for (const key of el.dataset.text) window.testKey(key);
       return [before, document.body.dataset.hearts];
     });
     check(healing[0] === "2" && healing[1] === "3", "S10 heart restores a lost heart");
@@ -738,7 +940,7 @@ async function calibrationAndSpecials() {
       const maxSpecials = document.querySelectorAll('.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="star"]').length;
       const threats = [...document.querySelectorAll('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]')].length;
       const before = document.querySelectorAll(".progress span.on").length;
-      for (const key of special.dataset.text) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+      for (const key of special.dataset.text) window.testKey(key);
       if (kind === "bomb") return { starts, maxSpecials, threats, gone: threats > 0 && !document.querySelector('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]'), gained: document.querySelectorAll(".progress span.on").length - before };
       const top = normal.getBoundingClientRect().top;
       const frozenLook = getComputedStyle(normal).filter !== "none" || normal.classList.contains("frozen");
@@ -767,7 +969,7 @@ async function calibrationAndSpecials() {
     const bonus = await page.evaluate(() => {
       const before = Number(document.querySelector("#stats").textContent.match(/\d+/)[0]);
       const el = document.querySelector('.ship[data-kind="star"]');
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: el.dataset.text }));
+      window.testKey(el.dataset.text);
       return Number(document.querySelector("#stats").textContent.match(/\d+/)[0]) - before;
     });
     check(bonus > 10, "S10 star awards extra points");
@@ -802,7 +1004,7 @@ async function virtualTypists() {
         const target = list[0], text = target.dataset.text;
         trace.push(`${target.dataset.kind}:${text}`);
         for (const key of text) {
-          window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+          window.testKey(key);
           window.advanceFrames(1200);
           elapsed += 1200;
           if (document.body.dataset.hearts !== '3' || document.body.dataset.level !== '0') break;
@@ -857,7 +1059,7 @@ async function arcadeContracts() {
   const playable = await page.evaluate(() => {
     window.advanceFrames(50);
     const el = document.querySelector('.ship');
-    if (el) window.dispatchEvent(new KeyboardEvent('keydown', { key: el.dataset.text[0] }));
+    if (el) window.testKey(el.dataset.text[0]);
     return !!document.querySelector('.trophy-flight') && document.querySelectorAll('.progress span.on').length === 1;
   });
   check(playable, 'S12 typing works while the award flies');
@@ -920,11 +1122,11 @@ async function arcadeContracts() {
       window.advanceFrames(50);
       const el = document.querySelector('.ship');
       const key = el.dataset.text[Number(el.dataset.typed)];
-      window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+      window.testKey(key);
       if (n === 9 || n === 19) values.push(document.querySelector('#streak').textContent);
     }
     window.advanceFrames(50);
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: '?' }));
+    window.testKey('?');
     values.push(document.querySelector('#streak').textContent);
     return values;
   });
@@ -934,7 +1136,7 @@ async function arcadeContracts() {
     await page.reload();
     await chooseGrade(page, grade);
     const mother = await page.evaluate(() => {
-      const type = (el) => { for (const key of el.dataset.text) window.dispatchEvent(new KeyboardEvent('keydown', { key })); };
+      const type = (el) => { for (const key of el.dataset.text) window.testKey(key); };
       for (let i = 0; i < 2; i++) { window.advanceFrames(50); const el = document.querySelector('.ship[data-kind="ship"]'); if (el) type(el); }
       window.advanceFrames(50);
       return !!document.querySelector('.ship[data-kind="mother"]');
@@ -955,12 +1157,12 @@ async function arcadeContracts() {
       elapsed += 1000;
       const motherDy = mother.getBoundingClientRect().top - motherBox.top;
       const childDy = child.getBoundingClientRect().top - childBox.top;
-      for (const key of child.dataset.text) window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+      for (const key of child.dataset.text) window.testKey(key);
       for (; elapsed < 25000 && mother.isConnected && !document.querySelector('.ship[data-kind="child"]'); elapsed += 50) window.advanceFrames(50);
       const next = !!document.querySelector('.ship[data-kind="child"]');
       const before = Number(document.querySelector('#stats').textContent.match(/\d+/)[0]);
       const particles = document.querySelectorAll('.particle').length;
-      for (const key of motherText) window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+      for (const key of motherText) window.testKey(key);
       const after = Number(document.querySelector('#stats').textContent.match(/\d+/)[0]);
       const multiplier = Number(document.querySelector('#streak strong').textContent.slice(1));
       return { length, motherLength: motherText.length, motherWidth: motherArt.width, childWidth: childArt.width, motherDy, childDy, initials, elapsed, next, delta: after - before, multiplier, burst: document.querySelectorAll('.particle').length - particles };
@@ -992,6 +1194,7 @@ async function arcadeContracts() {
 }
 
 (async () => {
+  await chromebookDesktopS10();
   await arcadeContracts();
   // ---------- Start screen: six grades ----------
   let game = await openGame("juegos/teclado.html");
