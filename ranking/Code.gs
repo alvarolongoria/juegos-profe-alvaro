@@ -183,12 +183,13 @@ function sheet() {
   return sheetNamed(SHEET, HEADER);
 }
 
-// The child types the key: spaces, capitals and accents do not matter.
+// The child types the key: spaces (even a missing one before the number), capitals and accents do not matter.
 function normalizeKey(value) {
   return String(value === undefined || value === null ? "" : value).trim().toLowerCase()
     .replace(/\s+/g, " ")
     .replace(/[áàä]/g, "a").replace(/[éèë]/g, "e").replace(/[íìï]/g, "i")
-    .replace(/[óòö]/g, "o").replace(/[úùü]/g, "u").replace(/ñ/g, "n");
+    .replace(/[óòö]/g, "o").replace(/[úùü]/g, "u").replace(/ñ/g, "n")
+    .replace(/([a-z])(\d)/g, "$1 $2");
 }
 
 // A key only counts when it looks like a key and is not a blocked word.

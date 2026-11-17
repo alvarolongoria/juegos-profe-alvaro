@@ -363,6 +363,9 @@ function handEdits() {
   check(keptAccent[4] === "Tiburón 47" && [1, 2, 3, 5, 6].every((g) => keptAccent[g] === plain[g])
     && add(accented, { grade: "4", key: "  TIBURON  47 " }).ok === true,
     `S5 a key written with an accent is kept as written and read without accents or extra spaces (${keptAccent[4]})`);
+  check(add(accented, { grade: "4", key: "Tiburón47" }).ok === true && add(accented, { grade: "4", key: "TIBURON47" }).ok === true
+    && add(accented, { grade: "4", key: "tiburon48" }).ok === false,
+    "S5 a key typed without the space between word and number is read the same, a wrong number still fails");
 
   const junk = load();
   const same = junk.keys();
