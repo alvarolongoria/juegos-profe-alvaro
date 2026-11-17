@@ -955,7 +955,10 @@
       const RANKING_ADJECTIVES = ["Veloz", "Valiente", "Feliz", "Audaz", "Genial", "Brillante", "Gigante",
         "Ágil", "Fuerte", "Alegre", "Leal", "Tenaz", "Imparable", "Increíble", "Elegante", "Sonriente"];
 
-      function showRanking(layer, resultGrade, resultScore, rankingUrl) {
+      // Grades that may also enter the ranking after level 3 (the server keeps the same list).
+      const RANKING_LEVEL_THREE_GRADES = [3];
+
+      function showRanking(layer, resultGrade, resultScore, rankingUrl, resultLevel = 4) {
         layer.classList.add("ranking-overlay");
         const section = document.createElement("section");
         section.id = "ranking";
@@ -963,7 +966,9 @@
         const title = document.createElement("h2");
         title.textContent = "¡Entra en el ranking del mes!";
         const details = document.createElement("p");
-        details.textContent = `Curso: ${resultGrade}º · Puntos: ${resultScore}`;
+        details.textContent = resultLevel === 3
+          ? `Curso: ${resultGrade}º · Nivel 3 superado · Puntos: ${resultScore}`
+          : `Curso: ${resultGrade}º · Puntos: ${resultScore}`;
         const form = document.createElement("form");
         function select(labelText, name, options) {
           const label = document.createElement("label");
@@ -1037,7 +1042,9 @@
             const item = document.createElement("li");
             // Names come from the server: treat them as text, never markup.
             const from = /^[1-6]$/.test(String(entry.from)) ? ` (de ${entry.from}º)` : "";
-            item.textContent = `${entry.name}${from} — ${entry.points}`;
+            // Where level 3 also counts, a medal tells who stopped there and who finished level 4.
+            const medal = !RANKING_LEVEL_THREE_GRADES.includes(resultGrade) ? "" : entry.level === 3 ? "🥈 " : "🏆 ";
+            item.textContent = `${medal}${entry.name}${from} — ${entry.points}`;
             if (!highlighted && saved && entry.name === saved.name && entry.points === saved.points) {
               item.classList.add("ranking-saved");
               item.setAttribute("aria-label", `Tu puntuación: ${item.textContent}`);
@@ -1063,7 +1070,7 @@
           const name = `${animal.value} ${adjective.value}`;
           message.textContent = "Guardando…";
           try {
-            const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim() });
+            const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim(), ...(resultLevel === 3 ? { level: 3 } : {}) });
             saved = { name, points: resultScore };
             if (version === requestVersion) render(top);
           } catch (error) {
@@ -1103,6 +1110,16 @@
           if (window.RANKING_URL) showRanking(document.querySelector(".overlay"), grade, stats.score, window.RANKING_URL);
           await overlay;
           startLevel(true); // The fourth level repeats after the summary.
+        } else if (window.RANKING_URL && RANKING_LEVEL_THREE_GRADES.includes(grade) && level === 2) {
+          // Level 3 done: the child may enter the ranking now and then play level 4.
+          playing = false;
+          updateTypingHint();
+          for (const ship of [...alive]) removeShip(ship);
+          const overlay = Juegos.overlay("🥈", `¡Nivel 3 superado!\n${summary()}`);
+          showRanking(document.querySelector(".overlay"), grade, stats.score, window.RANKING_URL, 3);
+          await overlay;
+          level++;
+          startLevel();
         } else {
           level++;
           startLevel();

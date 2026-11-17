@@ -122,7 +122,7 @@ function saveValid() {
   const [row] = game.rows();
   check(game.rows().length === 1 && row[1] === "2026-11" && row[2] === 5 && row[3] === "Tigre Veloz" && row[4] === 1200 && row[5] === 5,
     `S11 the row keeps date, month, grade, name, points and the key's grade (${JSON.stringify(row)})`);
-  check(game.sheets.Ranking.rows[0].join("|") === "Fecha|Mes|Curso|Nombre|Puntos|Curso alumno", "S11 a new sheet gets a header row");
+  check(game.sheets.Ranking.rows[0].join("|") === "Fecha|Mes|Curso|Nombre|Puntos|Curso alumno|Nivel", "S11 a new sheet gets a header row");
   check(Array.isArray(result.top) && result.top[0]?.name === "Tigre Veloz" && result.top[0]?.points === 1200, "S11 saving answers with the updated top 10 of the grade");
 }
 
@@ -444,10 +444,34 @@ function oldSheet() {
   sheets.Ranking.appendRow(["Fecha", "Mes", "Curso", "Nombre", "Puntos"]);
   sheets.Ranking.appendRow([new Date(), "'2026-11", 5, "Lobo Feliz", 700]);
   const result = add(legacy, {});
-  check(result.ok === true && sheets.Ranking.rows[0].join("|") === "Fecha|Mes|Curso|Nombre|Puntos|Curso alumno",
-    `S1 an existing sheet gets the «Curso alumno» title (${sheets.Ranking.rows[0].join("|")})`);
+  check(result.ok === true && sheets.Ranking.rows[0].join("|") === "Fecha|Mes|Curso|Nombre|Puntos|Curso alumno|Nivel",
+    `S1 an existing sheet gets the «Curso alumno» and «Nivel» titles (${sheets.Ranking.rows[0].join("|")})`);
   check(JSON.stringify(result.top) === JSON.stringify([{ name: "Tigre Veloz", points: 1200 }, { name: "Lobo Feliz", points: 700 }]),
     "S1 old rows without a real grade still show in the top");
+}
+
+// S6: only 3º may also enter after level 3; a level-4 finish always ranks above a level-3 one.
+function levelThree() {
+  const game = load();
+  const three = (fields) => add(game, { grade: "3", ...fields });
+  check(three({ level: "3", points: "900", animal: "Lince", adjective: "Feliz" }).ok === true
+    && game.rows()[0][6] === 3, "S6 a level-3 score is saved in 3º with its level");
+  check(add(game, { grade: "5", level: "3" }).ok === false && add(game, { grade: "2", level: "3" }).ok === false
+    && three({ level: "2" }).ok === false && three({ level: "x" }).ok === false && game.rows().length === 1,
+    "S6 level 3 is refused outside 3º and any other level is refused, saving nothing");
+  const finished = three({ points: "300", animal: "Lobo", adjective: "Leal" });
+  check(finished.ok === true && game.rows()[1][6] === 4, "S6 a score without a level counts as a level-4 finish (old pages keep working)");
+  three({ level: "3", points: "5000", animal: "Panda", adjective: "Fuerte" });
+  const top = game.json({ action: "top", grade: "3" }).top;
+  check(JSON.stringify(top) === JSON.stringify([
+    { name: "Lobo Leal", points: 300 },
+    { name: "Panda Fuerte", points: 5000, level: 3 },
+    { name: "Lince Feliz", points: 900, level: 3 },
+  ]), `S6 level 4 ranks above level 3 whatever the points, then by points (${JSON.stringify(top)})`);
+  const old = load(undefined, game.sheets);
+  game.sheets.Ranking.appendRow([new Date(), "'2026-11", 3, "Zorro Ágil", 100, 3]); // no level cell: written by the old script
+  check(JSON.stringify(old.json({ action: "top", grade: "3" }).top[1]) === JSON.stringify({ name: "Zorro Ágil", points: 100 }),
+    "S6 an old row without a level counts as level 4");
 }
 
 lists();
@@ -467,5 +491,6 @@ monthlyRotation();
 keyRules();
 handEdits();
 oldSheet();
+levelThree();
 console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 process.exit(failCount ? 1 : 0);

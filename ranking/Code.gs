@@ -95,7 +95,9 @@ var KEY_SHAPE = /^[a-z]{3,20}( [0-9]{1,2})?$/;
 var BLOCKED_KEYS = ["caca", "culo", "pedo", "pene", "pito", "popo", "puta", "puto", "teta", "nazi", "cono", "mear", "mierda"];
 
 var SHEET = "Ranking";
-var HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno"];
+var HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno", "Nivel"];
+// Grades that may also enter the ranking after level 3 (a level-4 finish always ranks above).
+var LEVEL_THREE_GRADES = [3];
 var KEYS_SHEET = "Claves";
 var KEYS_HEADER = ["Curso", "Clave", "Mes"];
 var GRADES = [1, 2, 3, 4, 5, 6];
@@ -352,13 +354,17 @@ function topOf(grade) {
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i];
     if (monthOf(row[1]) !== month || Number(row[2]) !== grade) continue;
+    var level = row[6] === "" || row[6] === undefined ? 4 : Number(row[6]);
     var entry = { name: String(row[3]), points: Number(row[4]) };
+    // Only the lower level is marked: a row without a level is a level-4 finish.
+    if (level === 3) entry.level = 3;
     // Mark only a child from a younger grade; older rows have no real grade.
     var real = readGrade(row[5]);
     if (real !== null && real !== grade) entry.from = real;
     entries.push(entry);
   }
-  entries.sort(function (a, b) { return b.points - a.points; });
+  // Finishing level 4 always counts more than stopping at level 3, then points decide.
+  entries.sort(function (a, b) { return (b.level === 3 ? 0 : 1) - (a.level === 3 ? 0 : 1) || b.points - a.points; });
   return { month: month, top: entries.slice(0, TOP_SIZE) };
 }
 
@@ -373,6 +379,9 @@ function add(params) {
   var grade = readGrade(params.grade);
   if (grade === null) return { ok: false, error: "bad grade" };
   if (ANIMALS.indexOf(params.animal) < 0 || ADJECTIVES.indexOf(params.adjective) < 0) return { ok: false, error: "bad name" };
+  // No level means the old page: a level-4 finish.
+  var level = params.level === undefined ? 4 : Number(params.level);
+  if (level !== 4 && !(level === 3 && LEVEL_THREE_GRADES.indexOf(grade) >= 0)) return { ok: false, error: "bad level" };
   if (!/^\d{1,6}$/.test(String(params.points)) || Number(params.points) > MAX_POINTS) return { ok: false, error: "bad points" };
   var refused = withLock(function () {
     // A simple brake against someone flooding the sheet or guessing keys.
@@ -386,7 +395,7 @@ function add(params) {
     // A key enters its own grade or an older one, never a younger one.
     if (real > grade) return { ok: false, error: "wrong grade", keyGrade: real };
     // The apostrophe keeps the month as text, so Sheets never turns it into a date.
-    sheet().appendRow([new Date(), "'" + currentMonth(), grade, params.animal + " " + params.adjective, Number(params.points), real]);
+    sheet().appendRow([new Date(), "'" + currentMonth(), grade, params.animal + " " + params.adjective, Number(params.points), real, level]);
     return null;
   });
   if (refused) return refused;

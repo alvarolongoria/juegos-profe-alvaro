@@ -440,10 +440,59 @@ async function keyErrors() {
   }
 }
 
+// S6: in 3º the ranking also opens after level 3; level 4 is still offered, and no other grade gets the early offer.
+async function levelThree() {
+  const adds = [];
+  const game = await gameWithClock(async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("action") === "add") {
+      adds.push(Object.fromEntries(url.searchParams));
+      await reply(route, response([
+        { name: "Lobo Leal", points: 300 },
+        { name: "Panda Feliz", points: 900, level: 3 },
+      ], 3));
+    } else await reply(route, response([], 3));
+  });
+  try {
+    const { page } = game;
+    await chooseGrade(page, 3);
+    for (let level = 0; level < 2; level++) {
+      const result = await finishWithClock(page);
+      check(result.finished && await page.locator("#ranking").count() === 0, `S6 no ranking after level ${level + 1} in 3º`);
+    }
+    const third = await finishWithClock(page);
+    const ranking = page.locator("#ranking");
+    check(third.finished && await ranking.count() === 1 && (await ranking.innerText()).includes("Nivel 3 superado"),
+      "S6 3º is offered the ranking after level 3");
+    await ranking.locator('select[name="animal"]').selectOption("Panda");
+    await fillKey(ranking, "sol");
+    await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 2, null, { polling: 100 });
+    check(adds.length === 1 && adds[0].level === "3" && adds[0].grade === "3" && adds[0].key === "sol",
+      `S6 the level-3 save tells the server the level (${JSON.stringify(adds[0])})`);
+    check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["🏆 Lobo Leal — 300", "🥈 Panda Feliz — 900"]),
+      "S6 the list marks a level-4 finish with 🏆 and a level-3 one with 🥈");
+    await page.locator(".overlay .play-btn").click({ force: true });
+    await page.waitForFunction(() => document.body.dataset.level === "3" && !document.querySelector(".overlay"), null, { polling: 100 });
+    check(await page.locator("#ranking").count() === 0, "S6 after saving, the play button goes on to level 4");
+    const fourth = await finishWithClock(page);
+    await page.waitForFunction(() => !document.querySelector(".trophy-flight"), null, { polling: 100 });
+    check(fourth.finished && await ranking.count() === 1 && !(await ranking.innerText()).includes("Nivel 3 superado"),
+      "S6 finishing level 4 still offers the normal ranking");
+    await fillKey(ranking, "sol");
+    await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.waitForFunction((n) => document.querySelectorAll("#ranking ol li").length === n, 2, { polling: 100 });
+    check(adds.length === 2 && !("level" in adds[1]), `S6 the level-4 save sends no level, as before (${JSON.stringify(adds[1])})`);
+    noExceptions(game, "S6 level three");
+  } finally {
+    await game.browser.close();
+  }
+}
+
 (async () => {
   for (const [label, run] of [["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
-    ["view errors", failedView], ["overlapping requests", overlappingRequests]]) {
+    ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }
   }
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
