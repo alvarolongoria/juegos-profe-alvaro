@@ -17,6 +17,8 @@ async function openGame(file) {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   page.on("request", (r) => !r.url().startsWith("file://") && external.push(r.url()));
+  // Tests never reach the school's real ranking; the ranking suite sets its own fake URL after this.
+  await page.addInitScript(() => { window.RANKING_URL = ""; });
   await page.goto(`${ROOT}/${file}`);
   return { browser, page, errors, external };
 }

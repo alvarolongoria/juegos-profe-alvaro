@@ -53,6 +53,7 @@ async function openGame(file, { tablet = true, clock = false } = {}) {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   if (clock) await page.addInitScript(frameClock);
+  await page.addInitScript(() => { window.RANKING_URL = ""; }); // the school ranking is not part of these checks
   await page.goto(`${ROOT}/${file}`);
   return { browser, page, errors };
 }
@@ -822,6 +823,7 @@ async function ipadLandscapeWaits() {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.addInitScript(frameClock);
+  await page.addInitScript(() => { window.RANKING_URL = ""; }); // the school ranking is not part of these checks
   await page.goto(`${ROOT}/juegos/teclado.html?debug=1`);
   const game = { browser, page, errors };
   // Chrome's strip: the visible area is 79px shorter with no keyboard at all.
@@ -909,6 +911,7 @@ async function phoneKeyboardCostsNoLives() {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.addInitScript(frameClock);
+  await page.addInitScript(() => { window.RANKING_URL = ""; }); // the school ranking is not part of these checks
   await page.goto(`${ROOT}/juegos/teclado.html`);
   const game = { browser, page, errors };
   await tapGrade(page, 1);

@@ -72,18 +72,18 @@
       .ranking-overlay .big-emoji { font-size: 60px; }
       .ranking-overlay .overlay-text { font-size: clamp(16px, 2.2vw, 24px); line-height: 1.2; }
       .ranking-overlay .play-btn { flex-shrink: 0; width: 68px; height: 68px; border-width: 3px; padding-left: 6px; font-size: 36px; }
-      #ranking { width: min(100%, 500px); padding: 10px 14px; border: 2px solid #24334b; border-radius: 16px; background: #fff7e4; color: #24334b; text-align: center; }
-      #ranking h2 { margin: 0 0 4px; font-size: 19px; }
-      #ranking p { margin: 4px 0; }
+      #ranking, #ranking-preview { width: min(100%, 500px); padding: 10px 14px; border: 2px solid #24334b; border-radius: 16px; background: #fff7e4; color: #24334b; text-align: center; }
+      #ranking h2, #ranking-preview h2 { margin: 0 0 4px; font-size: 19px; }
+      #ranking p, #ranking-preview p { margin: 4px 0; }
       #ranking form, #ranking .ranking-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: end; gap: 8px; }
       #ranking label { display: flex; flex-direction: column; gap: 2px; font-weight: bold; text-align: left; }
       #ranking select, #ranking input, #ranking button { min-height: 38px; padding: 4px 10px; border: 2px solid #24334b; border-radius: 9px; background: white; color: #24334b; font: inherit; }
       #ranking input { width: 8em; }
       #ranking button { background: #b9eff8; font-weight: bold; }
       #ranking button:disabled { opacity: .55; }
-      #ranking ol { width: fit-content; max-width: 100%; max-height: 120px; overflow: auto; margin: 6px auto 0; padding-left: 32px; text-align: left; }
-      #ranking ol:empty { display: none; }
-      #ranking li { padding: 2px 5px; overflow-wrap: anywhere; }
+      #ranking ol, #ranking-preview ol { width: fit-content; max-width: 100%; max-height: 120px; overflow: auto; margin: 6px auto 0; padding-left: 32px; text-align: left; }
+      #ranking ol:empty, #ranking-preview ol:empty { display: none; }
+      #ranking li, #ranking-preview li { padding: 2px 5px; overflow-wrap: anywhere; }
       #ranking .ranking-saved { border-radius: 6px; background: #ffda55; color: #142341; font-weight: bold; }
       .grade-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; max-width: 760px; }
       .grade-row .play-btn { width: 96px; height: 96px; font-size: 36px; font-weight: bold; }
@@ -958,6 +958,50 @@
       // Grades that may also enter the ranking after level 3 (the server keeps the same list).
       const RANKING_LEVEL_THREE_GRADES = [3];
 
+      // Names come from the server: the result is only ever used as text.
+      function rankingLabel(entry, resultGrade) {
+        const from = /^[1-6]$/.test(String(entry.from)) ? ` (de ${entry.from}º)` : "";
+        // Where level 3 also counts, a medal tells who stopped there and who finished level 4.
+        const medal = !RANKING_LEVEL_THREE_GRADES.includes(resultGrade) ? "" : entry.level === 3 ? "🥇 " : "🏆 ";
+        return `${medal}${entry.name}${from} — ${entry.points}`;
+      }
+
+      // Shown after choosing the grade: this month's top, then play. The game never
+      // waits for the network: the play button works even if the list does not load.
+      async function previewRanking(resultGrade, rankingUrl) {
+        const overlay = Juegos.overlay("🏆", `Ranking de ${resultGrade}º este mes`);
+        const layer = document.querySelector(".overlay");
+        layer.classList.add("ranking-overlay");
+        const section = document.createElement("section");
+        section.id = "ranking-preview";
+        section.setAttribute("aria-label", "Ranking del mes");
+        const message = document.createElement("p");
+        message.setAttribute("role", "status");
+        message.setAttribute("aria-live", "polite");
+        message.textContent = "Cargando ranking…";
+        const list = document.createElement("ol");
+        section.append(message, list);
+        layer.insertBefore(section, layer.querySelector(".play-btn"));
+        try {
+          const url = new URL(rankingUrl, window.location.href);
+          url.searchParams.set("action", "top");
+          url.searchParams.set("grade", resultGrade);
+          const response = await fetch(url.toString(), { signal: AbortSignal.timeout(6000) });
+          if (!response.ok) throw new Error("Ranking request failed");
+          const result = await response.json();
+          if (!result || result.ok !== true || !Array.isArray(result.top)) throw new Error("Ranking response failed");
+          message.textContent = result.top.length ? "" : "Todavía no hay nadie este mes. ¡Sé el primero!";
+          for (const entry of result.top) {
+            const item = document.createElement("li");
+            item.textContent = rankingLabel(entry, resultGrade);
+            list.appendChild(item);
+          }
+        } catch {
+          message.textContent = "No se pudo cargar el ranking ahora.";
+        }
+        await overlay;
+      }
+
       function showRanking(layer, resultGrade, resultScore, rankingUrl, resultLevel = 4) {
         layer.classList.add("ranking-overlay");
         const section = document.createElement("section");
@@ -1041,10 +1085,8 @@
           for (const entry of top) {
             const item = document.createElement("li");
             // Names come from the server: treat them as text, never markup.
-            const from = /^[1-6]$/.test(String(entry.from)) ? ` (de ${entry.from}º)` : "";
             // Where level 3 also counts, a medal tells who stopped there and who finished level 4.
-            const medal = !RANKING_LEVEL_THREE_GRADES.includes(resultGrade) ? "" : entry.level === 3 ? "🥈 " : "🏆 ";
-            item.textContent = `${medal}${entry.name}${from} — ${entry.points}`;
+            item.textContent = rankingLabel(entry, resultGrade);
             if (!highlighted && saved && entry.name === saved.name && entry.points === saved.points) {
               item.classList.add("ranking-saved");
               item.setAttribute("aria-label", `Tu puntuación: ${item.textContent}`);
@@ -1115,7 +1157,7 @@
           playing = false;
           updateTypingHint();
           for (const ship of [...alive]) removeShip(ship);
-          const overlay = Juegos.overlay("🥈", `¡Nivel 3 superado!\n${summary()}`);
+          const overlay = Juegos.overlay("🥇", `¡Nivel 3 superado!\n${summary()}`);
           showRanking(document.querySelector(".overlay"), grade, stats.score, window.RANKING_URL, 3);
           await overlay;
           level++;
@@ -1467,9 +1509,10 @@
         setInterval(showNumbers, 250);
       }
 
-      chooseGrade().then((g) => {
+      chooseGrade().then(async (g) => {
         grade = g;
         config = GRADES[g];
+        if (window.RANKING_URL) await previewRanking(g, window.RANKING_URL);
         startLevel();
         lastFrame = performance.now();
         requestAnimationFrame(tick);

@@ -35,6 +35,7 @@ async function open(browser, file, width, height) {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   page.on("request", (r) => !r.url().startsWith("file://") && external.push(r.url()));
+  await page.addInitScript(() => { window.RANKING_URL = ""; }); // the school ranking is not part of these checks
   await page.goto(`${ROOT}/${file}`);
   return { context, page, errors, external };
 }

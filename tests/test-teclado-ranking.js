@@ -42,6 +42,13 @@ async function installFrameClock(page) {
 async function chooseGrade(page, grade) {
   await page.waitForSelector(".overlay .grade-btn");
   await page.click(`.overlay .grade-btn[data-grade="${grade}"]`, { force: true });
+  // With a ranking URL the grade is followed by the ranking preview; play on from it.
+  if (await page.evaluate(() => !!window.RANKING_URL)) {
+    await page.waitForSelector("#ranking-preview");
+    await page.waitForFunction(() => document.querySelector("#ranking-preview p")?.textContent !== "Cargando ranking…", null, { polling: 50 });
+    await page.click(".overlay .play-btn", { force: true });
+    await page.waitForFunction(() => !document.querySelector(".overlay"), null, { polling: 50 });
+  }
 }
 
 async function finishWithClock(page) {
@@ -60,7 +67,9 @@ async function finishWithClock(page) {
   return { level, finished: await page.evaluate((level) => !!document.querySelector(".overlay") || document.body.dataset.level !== level, level) };
 }
 
-async function gameWithClock(handler) {
+// The ranking preview after choosing the grade asks for the top once. Unless a test is about
+// that screen, an empty answer is given here so the test's own handler only sees its own traffic.
+async function gameWithClock(handler, { previewHandled = false } = {}) {
   const game = await openGame("juegos/teclado.html");
   const { page } = game;
   game.pageErrors = [];
@@ -70,7 +79,14 @@ async function gameWithClock(handler) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   if (handler) {
     await page.addInitScript(() => { window.RANKING_URL = "https://ranking.test/exec"; });
-    await page.route("https://ranking.test/**", handler);
+    let previewed = previewHandled;
+    await page.route("https://ranking.test/**", (route) => {
+      if (!previewed) {
+        previewed = true;
+        return route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify({ ok: true, grade: 1, month: "2026-11", top: [] }) });
+      }
+      return handler(route);
+    });
   } else {
     // The real school URL lives in assets/ranking-config.js; an empty one turns the ranking off.
     await page.addInitScript(() => { window.RANKING_URL = ""; });
@@ -153,7 +169,8 @@ async function saveAndSafety() {
     check(await ranking.locator("input, textarea, [contenteditable=true]").count() === 1 && await keyField.count() === 1
       && await keyField.getAttribute("name") === "key" && await keyField.getAttribute("autocomplete") === "off",
       "S2 the only free-text field is the class key (the name still comes from the two lists)");
-    check(requests.length === 0 && game.external.length === 0, "S11 configuring the URL does not contact the server before a button is used");
+    check(requests.length === 0 && game.external.length === 1 && game.external[0].includes("action=top") && !game.external[0].includes("key="),
+      "S11 before a button is used the win screen asks nothing more than the start preview's read-only top");
     await page.keyboard.press("Tab");
     await page.waitForTimeout(700);
     check(await ranking.locator('select[name="animal"]').evaluate((el) => document.activeElement === el),
@@ -470,8 +487,8 @@ async function levelThree() {
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 2, null, { polling: 100 });
     check(adds.length === 1 && adds[0].level === "3" && adds[0].grade === "3" && adds[0].key === "sol",
       `S6 the level-3 save tells the server the level (${JSON.stringify(adds[0])})`);
-    check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["🏆 Lobo Leal — 300", "🥈 Panda Feliz — 900"]),
-      "S6 the list marks a level-4 finish with 🏆 and a level-3 one with 🥈");
+    check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["🏆 Lobo Leal — 300", "🥇 Panda Feliz — 900"]),
+      "S6 the list marks a level-4 finish with 🏆 and a level-3 one with 🥇");
     await page.locator(".overlay .play-btn").click({ force: true });
     await page.waitForFunction(() => document.body.dataset.level === "3" && !document.querySelector(".overlay"), null, { polling: 100 });
     check(await page.locator("#ranking").count() === 0, "S6 after saving, the play button goes on to level 4");
@@ -489,10 +506,55 @@ async function levelThree() {
   }
 }
 
+// S7: after choosing the grade the child sees this month's top, then plays; a slow or broken server never blocks the game.
+async function startPreview() {
+  const seen = [];
+  const game = await gameWithClock(async (route) => {
+    seen.push(new URL(route.request().url()));
+    await reply(route, response([
+      { name: "Lobo Leal", points: 300 },
+      { name: "Panda Feliz", points: 900, level: 3 },
+      { name: "Tigre Veloz", points: 200, from: 2 },
+    ], 3));
+  }, { previewHandled: true });
+  try {
+    const { page } = game;
+    await page.waitForSelector(".overlay .grade-btn");
+    await page.click('.overlay .grade-btn[data-grade="3"]', { force: true });
+    await page.waitForSelector("#ranking-preview li");
+    const preview = page.locator("#ranking-preview");
+    check(JSON.stringify(await preview.locator("li").allTextContents()) === JSON.stringify(["🏆 Lobo Leal — 300", "🥇 Panda Feliz — 900", "🏆 Tigre Veloz (de 2º) — 200"]),
+      "S7 the preview lists the grade's top with the same medals as the ranking");
+    check(seen.length === 1 && seen[0].searchParams.get("action") === "top" && seen[0].searchParams.get("grade") === "3" && !seen[0].searchParams.has("key"),
+      `S7 the preview only reads the chosen grade's top, with no key (${seen.map(String).join(" ")})`);
+    check(await page.locator("#ranking").count() === 0 && await page.locator("body").evaluate((b) => b.dataset.level === undefined || b.dataset.level === ""),
+      "S7 the game has not started while the preview is shown");
+    await page.click(".overlay .play-btn", { force: true });
+    await page.waitForFunction(() => document.body.dataset.level === "0" && !document.querySelector(".overlay"), null, { polling: 100 });
+    check(true, "S7 the play button starts level 1");
+    noExceptions(game, "S7 preview");
+  } finally {
+    await game.browser.close();
+  }
+  // A server that fails still lets the child play.
+  const broken = await gameWithClock((route) => route.fulfill({ status: 500, body: "no" }), { previewHandled: true });
+  try {
+    const { page } = broken;
+    await page.waitForSelector(".overlay .grade-btn");
+    await page.click('.overlay .grade-btn[data-grade="2"]', { force: true });
+    await page.waitForFunction(() => document.querySelector("#ranking-preview p")?.textContent.includes("No se pudo cargar"), null, { polling: 100 });
+    await page.click(".overlay .play-btn", { force: true });
+    await page.waitForFunction(() => document.body.dataset.level === "0" && !document.querySelector(".overlay"), null, { polling: 100 });
+    check(true, "S7 a failing ranking server does not block the game");
+  } finally {
+    await broken.browser.close();
+  }
+}
+
 (async () => {
   for (const [label, run] of [["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
-    ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree]]) {
+    ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["start preview", startPreview]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }
   }
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
