@@ -95,6 +95,9 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
 }
 
 const SECRET = "test-secret-123456";
+// S5: a key a child can remember is a word plus a two-digit number.
+const KEY_SHAPE = /^[a-záéíóúüñ]+ [0-9]{2}$/;
+const fold = (word) => word.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 // By default each score brings the right class key of its own grade.
 const add = (game, fields) => {
   const grade = fields.grade ?? "5";
@@ -197,12 +200,14 @@ function readKeys() {
   const values = Object.values(result.keys || {});
   check(result.ok === true && result.month === "2026-11" && Object.keys(result.keys || {}).join() === "1,2,3,4,5,6",
     `S3 the bot gets the keys of the six grades and their month (${JSON.stringify(result)})`);
-  check(values.length === 6 && new Set(values).size === 6 && values.every((k) => /^[a-z]{3,12}$/.test(k)),
-    `S4 the six keys are different short lowercase words (${values.join(",")})`);
+  check(values.length === 6 && new Set(values).size === 6 && values.every((k) => KEY_SHAPE.test(k)),
+    `S5 the six keys are different easy words with a number (${values.join(",")})`);
+  const words = values.map((k) => k.split(" ")[0]);
+  check(new Set(words).size === 6, `S5 no two grades share the same word, even with a different number (${words.join(",")})`);
   const seen = new Set();
   for (let i = 0; i < 40; i++) Object.values(load().keys()).forEach((k) => seen.add(k));
-  check([...seen].every((k) => /^([bcdfgjlmnprstvz][aeiou]){2}$/.test(k)) && seen.size > 120,
-    `S2 generated keys are two easy syllables from a large space, not a short public list (${seen.size} different in 40 months)`);
+  check([...seen].every((k) => KEY_SHAPE.test(k)) && seen.size > 120,
+    `S5 every month mints new word keys, so the space stays large (${seen.size} different in 40 months)`);
   check(sheetKeys(game).map((r) => `${r[0]}|${r[1]}|${r[2]}`).join(";") === values.map((k, i) => `${i + 1}|${k}|2026-11`).join(";")
     && game.sheets.Claves.rows[0].join("|") === "Curso|Clave|Mes", "S3 the keys live in the «Claves» tab of the sheet (Curso|Clave|Mes)");
   check(JSON.stringify(game.post({ action: "keys", secret: SECRET }).keys) === JSON.stringify(result.keys), "S4 the keys stay the same within the month");
@@ -249,7 +254,7 @@ function setKey() {
   const refused = [
     [{ grade: "5", key: "cometa" }, "a key already used by another grade"],
     [{ grade: "5", key: "a1" }, "a key with digits or too short"],
-    [{ grade: "5", key: "abcdefghijklm" }, "a key longer than 12 letters"],
+    [{ grade: "5", key: "a".repeat(21) }, "a key longer than 20 letters"],
     [{ grade: "7", key: "nieve" }, "grade 7"],
     [{ grade: "5", key: "nieve", secret: "wrong" }, "a wrong secret"],
   ];
@@ -260,6 +265,9 @@ function setKey() {
   }
   const later = load("2026-11-28T10:00:00Z", game.sheets);
   check(later.keys()["6"] === "cometa", "S4 a key set by hand stays for the rest of the month");
+  const handwritten = game.post({ action: "setkey", secret: SECRET, grade: "5", key: "  Tiburón 47 " });
+  check(handwritten.ok === true && handwritten.keys["5"] === "tiburon 47" && add(game, { grade: "5", key: "TIBURON 47" }).ok === true,
+    `S5 the teacher may hand-write a word with a number, read without capitals or accents (${JSON.stringify(handwritten)})`);
 }
 
 // S4: on the first use of a new month every key changes by itself.
@@ -348,14 +356,81 @@ function handEdits() {
     && tabOf(missing).slice(1).map((r) => r[0]).join() === "1,2,3,4,5,6",
     `S3 a deleted row gets a new key only for its grade and the tab is tidy again (${JSON.stringify(fixed)})`);
 
+  const accented = load();
+  const plain = accented.keys();
+  setRow(accented, 4, "Tiburón 47");
+  const keptAccent = accented.keys();
+  check(keptAccent[4] === "Tiburón 47" && [1, 2, 3, 5, 6].every((g) => keptAccent[g] === plain[g])
+    && add(accented, { grade: "4", key: "  TIBURON  47 " }).ok === true,
+    `S5 a key written with an accent is kept as written and read without accents or extra spaces (${keptAccent[4]})`);
+
   const junk = load();
   const same = junk.keys();
   setRow(junk, 2, "a1");
   junk.sheets.Claves.rows.push([9, "mesa", "2026-11"], ["", "nota de la profe", ""]);
   const cleaned = junk.keys();
-  check(cleaned[2] !== "a1" && /^[a-z]{3,12}$/.test(cleaned[2]) && [1, 3, 4, 5, 6].every((g) => cleaned[g] === same[g])
+  check(cleaned[2] !== "a1" && KEY_SHAPE.test(cleaned[2]) && [1, 3, 4, 5, 6].every((g) => cleaned[g] === same[g])
     && tabOf(junk).length === 7 && add(junk, { grade: "6", key: "mesa" }).error === "bad key",
     `S3 an invalid key is replaced and extra rows are removed and never accepted (${tabOf(junk).length} rows)`);
+}
+
+// S5: the keys come from a curated pool of words a child can remember.
+function keyPool() {
+  const context = load().context;
+  const pool = context.KEY_WORDS || [];
+  const blocked = context.BLOCKED_KEYS || [];
+  check(Array.isArray(pool) && pool.length >= 300, `S5 the word pool is large enough to keep guessing slow (${pool && pool.length} words)`);
+  check(pool.every((w) => /^[a-záéíóúüñ]+$/.test(w) && w.length >= 3 && w.length <= 20),
+    `S5 every pool word is plain letters, 3 to 20 of them (${pool.filter((w) => !/^[a-záéíóúüñ]+$/.test(w)).join(",")})`);
+  check(new Set(pool.map(fold)).size === pool.length, "S5 no two pool words read the same once accents are ignored");
+  check(pool.every((w) => blocked.indexOf(w) < 0), `S5 the pool never holds a blocked word (${pool.filter((w) => blocked.indexOf(w) >= 0).join(",")})`);
+  const minted = new Set();
+  for (let i = 0; i < 20; i++) Object.values(load().keys()).forEach((k) => minted.add(k.split(" ")[0]));
+  check([...minted].every((w) => pool.indexOf(w) >= 0), `S5 every minted word comes from the pool (${[...minted].filter((w) => pool.indexOf(w) < 0).join(",")})`);
+  check(pool.length * 90 >= 20000, `S5 words plus a two-digit number give ${pool.length * 90} combinations instead of 5,625 meaningless syllables`);
+}
+
+// S5/D8: the teacher can mint a fresh set of keys without waiting for day 1.
+function rotate() {
+  const game = load();
+  const before = game.keys();
+  const snapshot = JSON.stringify(sheetKeys(game));
+  const refused = JSON.parse(game.postRaw({ action: "rotate", secret: "wrong" }).text);
+  check(refused.ok === false && JSON.stringify(sheetKeys(game)) === snapshot, "S5 rotate needs the bot secret and changes nothing without it");
+  const result = game.post({ action: "rotate", secret: SECRET });
+  const values = Object.values(result.keys || {});
+  check(result.ok === true && result.month === "2026-11" && values.length === 6 && values.every((k) => KEY_SHAPE.test(k))
+    && new Set(values).size === 6 && values.every((k) => !Object.values(before).includes(k)),
+    `S5 rotate mints six new word keys for the same month (${JSON.stringify(before)} -> ${JSON.stringify(result.keys)})`);
+  check(JSON.stringify(sheetKeys(game).map((r) => `${r[0]}|${r[1]}|${r[2]}`)) === JSON.stringify(values.map((k, i) => `${i + 1}|${k}|2026-11`)),
+    "S5 rotate writes the new keys to the «Claves» tab of the current month");
+  check(add(game, { grade: "4", key: before["4"] }).error === "bad key" && add(game, { grade: "4", key: result.keys["4"] }).ok === true,
+    "S5 after rotating, the old key is dead and the new one works at once");
+  check(JSON.stringify(game.keys()) === JSON.stringify(result.keys), "S5 the rotated keys stay for the rest of the month");
+}
+
+// S5: a «Claves» tab full of hand edits still answers and never hangs.
+function crowdedTab() {
+  const pool = load().context.KEY_WORDS;
+  const withRows = (words) => {
+    const game = load();
+    game.keys(); // creates the tab and its header row
+    const tab = game.sheets.Claves;
+    tab.rows.splice(1);
+    words.forEach((w, i) => tab.appendRow([i < 6 ? i + 1 : "", `${w} 10`, i < 6 ? "2026-10" : "2026-11"]));
+    return game;
+  };
+  const used = pool.slice(0, pool.length - 6);
+  const room = withRows(used);
+  const fresh = room.keys();
+  const values = Object.values(fresh);
+  check(values.length === 6 && values.every((k) => KEY_SHAPE.test(k)) && new Set(values).size === 6
+    && values.every((k) => used.indexOf(k.split(" ")[0]) < 0),
+    `S5 with the tab nearly full of hand-written words, six fresh ones still come out (${values.join(",")})`);
+  const full = withRows(pool);
+  const answer = JSON.parse(full.postRaw({ action: "keys", secret: SECRET }).text);
+  check(answer.ok === false && answer.error === "server error",
+    `S5 a tab that already holds every pool word answers with an error instead of hanging (${JSON.stringify(answer)})`);
 }
 
 // Sheets created before the key keep working and gain the new column title.
@@ -381,6 +456,9 @@ callback();
 rateLimit();
 unknownAction();
 readKeys();
+keyPool();
+crowdedTab();
+rotate();
 setKey();
 monthlyRotation();
 keyRules();
