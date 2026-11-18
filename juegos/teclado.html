@@ -89,6 +89,8 @@
       #ranking ol, #ranking-preview ol { width: fit-content; max-width: 100%; max-height: 120px; overflow: auto; margin: 6px auto 0; padding-left: 32px; text-align: left; }
       #ranking ol:empty, #ranking-preview ol:empty { display: none; }
       #ranking li, #ranking-preview li { padding: 2px 5px; overflow-wrap: anywhere; }
+      #ranking .ranking-personal:empty { display: none; }
+      #ranking .ranking-personal { margin: 6px 0; font-weight: bold; color: #142341; }
       #ranking .ranking-saved { border-radius: 6px; background: #ffda55; color: #142341; font-weight: bold; }
       .ranking-warning { width: min(480px, calc(100% - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 20px; border: 3px solid #24334b; border-radius: 18px; background: #fff7e4; color: #24334b; text-align: center; }
       .ranking-warning::backdrop { background: #142341aa; }
@@ -1110,8 +1112,11 @@
         const message = document.createElement("p");
         message.setAttribute("role", "status");
         message.setAttribute("aria-live", "polite");
+        // After a save: the pupil's own stored best and position, even outside the top ten.
+        const personal = document.createElement("p");
+        personal.className = "ranking-personal";
         const list = document.createElement("ol");
-        section.append(title, details, form, message, list);
+        section.append(title, details, form, message, personal, list);
         layer.insertBefore(section, layer.querySelector(".play-btn"));
 
         let submitted = false, saving = false, requestVersion = 0, saved = null, saveFailed = false;
@@ -1200,7 +1205,7 @@
             throw new RetryableRefusal("Ese nombre ya es de un compañero con otros emojis. Elige otro nombre o revisa tus emojis.");
           }
           if (!result || result.ok !== true || !Array.isArray(result.top)) throw new Error("Ranking response failed");
-          return result.top;
+          return result;
         }
         function render(top) {
           message.textContent = top.length ? "" : "Todavía no hay nadie este mes";
@@ -1236,10 +1241,14 @@
           const name = `${animal.value} ${adjective.value}`;
           message.textContent = "Guardando…";
           try {
-            const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim(), lock: chosen.join(","), ...(resultLevel === 3 ? { level: 3 } : {}) });
+            const result = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim(), lock: chosen.join(","), ...(resultLevel === 3 ? { level: 3 } : {}) });
             rankingAvailable = true;
-            saved = { name, points: resultScore };
-            if (version === requestVersion) render(top);
+            // An older server sends no "me": then nothing personal is shown, as before.
+            const me = result.me;
+            const known = me && Number.isFinite(me.points) && Number.isInteger(me.position) && me.position > 0;
+            personal.textContent = known ? `Tu mejor marca: ${me.points} · Estás en el puesto ${me.position} de ${resultGrade}º` : "";
+            saved = { name, points: known ? me.points : resultScore };
+            if (version === requestVersion) render(result.top);
             returnToForm();
           } catch (error) {
             if (error instanceof RetryableRefusal) {
@@ -1263,7 +1272,7 @@
           view.disabled = true;
           message.textContent = "Cargando ranking…";
           try {
-            const top = await request({ action: "top", grade: resultGrade });
+            const { top } = await request({ action: "top", grade: resultGrade });
             if (version === requestVersion) {
               rankingAvailable = true;
               render(top);

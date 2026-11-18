@@ -126,7 +126,7 @@ function lists() {
 function saveValid() {
   const game = load();
   const result = add(game, {});
-  check(game.events.join() === "lock,flush,release,lock,flush,release", `S2 every locked write is flushed to the sheet before the lock is released (${game.events.join()})`);
+  check(game.events.join() === "lock,flush,release,lock,flush,flush,release", `S2 every locked write is flushed before the result is read and before the lock is released (${game.events.join()})`);
   check(result.ok === true, `S11 a valid score is saved (${JSON.stringify(result)})`);
   const [row] = game.rows();
   check(game.rows().length === 1 && row[1] === "2026-11" && row[2] === 5 && row[3] === "Tigre Veloz" && row[4] === 1200 && row[5] === 5,
@@ -150,8 +150,11 @@ function rejectInvalid() {
   ];
   for (const [fields, label] of cases) {
     const game = load();
-    const result = add(game, fields);
-    check(result.ok === false && typeof result.error === "string" && game.rows().length === 0, `S11 rejects ${label} and saves nothing (${JSON.stringify(result)})`);
+    const keys = game.keys();
+    const before = allSheets(game);
+    const result = add(game, { key: keys[5], ...fields });
+    check(result.ok === false && typeof result.error === "string" && !("me" in result)
+      && game.rows().length === 0 && allSheets(game) === before, `S11 rejects ${label} without a personal result or sheet writes (${JSON.stringify(result)})`);
   }
 }
 
@@ -491,7 +494,8 @@ const validHash = (value, lock) => {
   const [salt, hash] = String(value || "").split(":");
   return /^[0-9a-f-]{36}$/.test(salt || "") && hash === hashLock(salt, lock);
 };
-const expectedAdd = (grade, month, top) => ({ ok: true, grade, month, top });
+const expectedAdd = (grade, month, top, me) => ({ ok: true, grade, month, top, ...(me ? { me } : {}) });
+const expectedMe = (name, points, position, total, level) => ({ name, points, position, total, ...(level === 3 ? { level: 3 } : {}) });
 const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const noLockLeak = (value, locks) => {
   const text = JSON.stringify(value);
@@ -505,7 +509,7 @@ function lockedBest() {
   const firstTop = [{ name: "Tigre Veloz", points: 900, level: 3 }];
   const row = game.rows()[0] || [];
   const [salt, digest] = String(row[7] || "").split(":");
-  check(same(first, expectedAdd(3, "2026-11", firstTop)) && game.rows().length === 1
+  check(same(first, expectedAdd(3, "2026-11", firstTop, expectedMe("Tigre Veloz", 900, 1, 1, 3))) && game.rows().length === 1
     && row[0] instanceof Date && same(row.slice(1, 7), ["2026-11", 3, "Tigre Veloz", 900, 3, 3])
     && /^[0-9a-f-]{36}$/.test(salt || "") && digest === hashLock(salt, lock)
     && noLockLeak(game.sheets.Ranking.rows, [lock]) && noLockLeak(first, [lock, salt, digest]),
@@ -515,29 +519,29 @@ function lockedBest() {
   for (const points of ["800", "900"]) {
     const before = snapshot(game);
     const result = add(game, { grade: "3", level: "3", points, lock });
-    check(same(result, expectedAdd(3, "2026-11", firstTop)) && snapshot(game) === before && game.rows().length === 1,
+    check(same(result, expectedAdd(3, "2026-11", firstTop, expectedMe("Tigre Veloz", 900, 1, 1, 3))) && snapshot(game) === before && game.rows().length === 1,
       `S5 same lock with ${points} points keeps the better/equal level-3 row unchanged`);
   }
   const key2 = game.keys()[2];
   const improved = add(game, { grade: "3", key: key2, level: "3", points: "1000", lock });
   const top3 = [{ name: "Tigre Veloz", points: 1000, level: 3, from: 2 }];
-  check(same(improved, expectedAdd(3, "2026-11", top3)) && game.rows().length === 1
+  check(same(improved, expectedAdd(3, "2026-11", top3, expectedMe("Tigre Veloz", 1000, 1, 1, 3))) && game.rows().length === 1
     && same(game.rows()[0].slice(1), ["2026-11", 3, "Tigre Veloz", 1000, 2, 3, `${salt}:${digest}`]),
     "S5 same lock improves level-3 points and keeps the associated pupil grade in the same row");
   const finished = add(game, { grade: "3", level: "4", points: "20", lock });
   const top4 = [{ name: "Tigre Veloz", points: 20 }];
-  check(same(finished, expectedAdd(3, "2026-11", top4)) && game.rows().length === 1
+  check(same(finished, expectedAdd(3, "2026-11", top4, expectedMe("Tigre Veloz", 20, 1, 1))) && game.rows().length === 1
     && same(game.rows()[0].slice(1), ["2026-11", 3, "Tigre Veloz", 20, 3, 4, `${salt}:${digest}`]),
     "S5 level 4 replaces level 3 even with fewer points, preserving the lock");
   for (const fields of [{ level: "3", points: "99999" }, { level: "4", points: "20" }, { level: "4", points: "10" }]) {
     const before = snapshot(game);
     const result = add(game, { grade: "3", ...fields, lock });
-    check(same(result, expectedAdd(3, "2026-11", top4)) && snapshot(game) === before && game.rows().length === 1,
+    check(same(result, expectedAdd(3, "2026-11", top4, expectedMe("Tigre Veloz", 20, 1, 1))) && snapshot(game) === before && game.rows().length === 1,
       `S5 same lock keeps level 4 over level ${fields.level} with ${fields.points} points`);
   }
   const later = load("2026-11-14T11:00:00Z", game.sheets);
   const better = add(later, { grade: "3", level: "4", points: "21", lock });
-  check(same(better, expectedAdd(3, "2026-11", [{ name: "Tigre Veloz", points: 21 }]))
+  check(same(better, expectedAdd(3, "2026-11", [{ name: "Tigre Veloz", points: 21 }], expectedMe("Tigre Veloz", 21, 1, 1)))
     && later.rows().length === 1 && later.rows()[0][0].toISOString() === "2026-11-14T11:00:00.000Z"
     && same(later.rows()[0].slice(1), ["2026-11", 3, "Tigre Veloz", 21, 3, 4, `${salt}:${digest}`])
     && noLockLeak(later.sheets.Ranking.rows, [lock]), "S5 a better level-4 score replaces the result and date in the same row");
@@ -559,7 +563,7 @@ function lockedScopesAndLegacy() {
   const lock = "0,0,11";
   const added = add(game, { lock, points: "400" });
   let rows = game.rows();
-  check(same(added, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 400 }, { name: "Tigre Veloz", points: 300 }]))
+  check(same(added, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 400 }, { name: "Tigre Veloz", points: 300 }], expectedMe("Tigre Veloz", 400, 1, 2)))
     && rows.length === 2 && same(rows[0].slice(1), ["2026-11", 5, "Tigre Veloz", 300, 5, 4])
     && same(rows[1].slice(1, 7), ["2026-11", 5, "Tigre Veloz", 400, 5, 4])
     && validHash(rows[1][7], lock) && snapshot(game) !== legacy && game.sheets.Ranking.rows[0][7] === "Candado"
@@ -570,13 +574,13 @@ function lockedScopesAndLegacy() {
   rows = game.rows();
   check(same(stale, expectedAdd(5, "2026-11", [
     { name: "Tigre Veloz", points: 500 }, { name: "Tigre Veloz", points: 400 }, { name: "Tigre Veloz", points: 300 },
-  ])) && rows.length === 3 && same(rows[2].slice(1, 7), ["2026-11", 5, "Tigre Veloz", 500, 5, 4]) && !rows[2][7],
+  ], expectedMe("Tigre Veloz", 500, 1, 3))) && rows.length === 3 && same(rows[2].slice(1, 7), ["2026-11", 5, "Tigre Veloz", 500, 5, 4]) && !rows[2][7],
     "S5 a stale page with no lock still appends an unlocked row even after the name is claimed");
   const update = add(game, { points: "600", lock });
   rows = game.rows();
   check(same(update, expectedAdd(5, "2026-11", [
     { name: "Tigre Veloz", points: 600 }, { name: "Tigre Veloz", points: 500 }, { name: "Tigre Veloz", points: 300 },
-  ])) && rows.length === 3 && rows[0][4] === 300 && rows[1][4] === 600 && rows[1][7] === originalHash && rows[2][4] === 500,
+  ], expectedMe("Tigre Veloz", 600, 1, 3))) && rows.length === 3 && rows[0][4] === 300 && rows[1][4] === 600 && rows[1][7] === originalHash && rows[2][4] === 500,
     "S5 a returning owner updates only its locked row when old and stale duplicates exist");
   const before = allSheets(game);
   const refused = add(game, { lock: "0,11,0" });
@@ -585,14 +589,14 @@ function lockedScopesAndLegacy() {
 
   const otherGrade = add(game, { grade: "6", points: "700", lock });
   rows = game.rows();
-  check(same(otherGrade, expectedAdd(6, "2026-11", [{ name: "Tigre Veloz", points: 700 }])) && rows.length === 4
+  check(same(otherGrade, expectedAdd(6, "2026-11", [{ name: "Tigre Veloz", points: 700 }], expectedMe("Tigre Veloz", 700, 1, 1))) && rows.length === 4
     && same(rows[3].slice(1, 7), ["2026-11", 6, "Tigre Veloz", 700, 6, 4])
     && validHash(rows[3][7], lock) && rows[3][7] !== originalHash,
     "S3/S5 the same name and lock in another grade gets its own independently salted row");
   const nextMonth = load("2026-12-01T10:00:00Z", game.sheets);
   const december = add(nextMonth, { points: "800", lock });
   rows = nextMonth.rows();
-  check(same(december, expectedAdd(5, "2026-12", [{ name: "Tigre Veloz", points: 800 }])) && rows.length === 5
+  check(same(december, expectedAdd(5, "2026-12", [{ name: "Tigre Veloz", points: 800 }], expectedMe("Tigre Veloz", 800, 1, 1))) && rows.length === 5
     && same(rows[4].slice(1, 7), ["2026-12", 5, "Tigre Veloz", 800, 5, 4])
     && validHash(rows[4][7], lock) && new Set([originalHash, rows[3][7], rows[4][7]]).size === 3
     && noLockLeak(nextMonth.sheets.Ranking.rows, [lock]),
@@ -610,8 +614,9 @@ function differentNames() {
   const third = add(game, { adjective: "Feliz", points: "100", lock: otherLock });
   const top = [{ name: "Tigre Veloz", points: 500 }, { name: "Panda Veloz", points: 200 }, { name: "Tigre Feliz", points: 100 }];
   const rows = game.rows();
-  check(same(first, expectedAdd(5, "2026-11", top.slice(0, 1))) && same(second, expectedAdd(5, "2026-11", top.slice(0, 2)))
-    && same(third, expectedAdd(5, "2026-11", top)) && rows.length === 3
+  check(same(first, expectedAdd(5, "2026-11", top.slice(0, 1), expectedMe("Tigre Veloz", 500, 1, 1)))
+    && same(second, expectedAdd(5, "2026-11", top.slice(0, 2), expectedMe("Panda Veloz", 200, 2, 2)))
+    && same(third, expectedAdd(5, "2026-11", top, expectedMe("Tigre Feliz", 100, 3, 3))) && rows.length === 3
     && same(rows.map((row) => row.slice(1, 7)), [
       ["2026-11", 5, "Tigre Veloz", 500, 5, 4], ["2026-11", 5, "Panda Veloz", 200, 5, 4], ["2026-11", 5, "Tigre Feliz", 100, 5, 4],
     ]) && validHash(rows[0][7], lock) && validHash(rows[1][7], lock) && validHash(rows[2][7], otherLock)
@@ -624,7 +629,7 @@ function differentNames() {
   const improved = add(game, { animal: "Panda", points: "600", lock });
   check(same(improved, expectedAdd(5, "2026-11", [
     { name: "Panda Veloz", points: 600 }, { name: "Tigre Veloz", points: 500 }, { name: "Tigre Feliz", points: 100 },
-  ]))
+  ], expectedMe("Panda Veloz", 600, 1, 3)))
     && game.rows().length === 3 && same(game.rows().map((row) => row[4]), [500, 600, 100])
     && game.rows()[1][7] === rows[1][7] && noLockLeak(improved, [lock, otherLock]),
     "S5 a matching lock updates only its own name and public results omit the lock");
@@ -635,7 +640,7 @@ function dateCellsAndForgottenLock() {
   const lock = "11,4,0";
   const first = add(game, { lock, points: "300" });
   const firstRow = game.rows()[0] || [];
-  check(same(first, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 300 }]))
+  check(same(first, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 300 }], expectedMe("Tigre Veloz", 300, 1, 1)))
     && game.rows().length === 1 && same(firstRow.slice(1, 7), ["2026-11", 5, "Tigre Veloz", 300, 5, 4])
     && validHash(firstRow[7], lock) && noLockLeak(game.sheets.Ranking.rows, [lock]),
     "S3/S5 a new reservation stores the expected row and a real salted hash");
@@ -647,16 +652,97 @@ function dateCellsAndForgottenLock() {
   check(same(refused, { ok: false, error: "name taken" }) && allSheets(game) === before && game.rows().length === 1,
     "S5 a locked row with an old date-form month still protects its name without writes");
   const updated = add(game, { lock, points: "400" });
-  check(same(updated, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 400 }])) && game.rows().length === 1
+  check(same(updated, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 400 }], expectedMe("Tigre Veloz", 400, 1, 1))) && game.rows().length === 1
     && same(game.rows()[0].slice(1), ["2026-11", 5, "Tigre Veloz", 400, 5, 4, previousHash]),
     "S5 a correct lock updates a row whose month had been converted to a date");
   game.sheets.Ranking.deleteRows(2, 1); // the teacher deletes the row after a forgotten lock
   const replacement = add(game, { lock: "0,4,11", points: "200" });
   const row = game.rows()[0] || [];
-  check(same(replacement, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 200 }])) && game.rows().length === 1
+  check(same(replacement, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 200 }], expectedMe("Tigre Veloz", 200, 1, 1))) && game.rows().length === 1
     && same(row.slice(1, 7), ["2026-11", 5, "Tigre Veloz", 200, 5, 4]) && validHash(row[7], "0,4,11")
     && row[7] !== previousHash && noLockLeak(game.sheets.Ranking.rows, [lock, "0,4,11"]),
     "S3 deleting a forgotten lock's row frees the name for a new lock with a fresh salt");
+}
+
+// S1: identify the exact written row, including ties and old unlocked duplicates.
+function ownPosition() {
+  const game = load();
+  const keys = game.keys();
+  const tab = game.context.SpreadsheetApp.getActiveSpreadsheet().insertSheet("Ranking");
+  tab.appendRow(["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno", "Nivel", "Candado"]);
+  for (const row of [
+    ["'2026-11", 3, "Lobo Leal", 300, 3, 4],
+    ["'2026-11", 3, "Tigre Veloz", 200, 3, 4],
+    ["'2026-11", 3, "Panda Veloz", 200, 3, 4],
+    ["'2026-11", 3, "León Feliz", 90000, 3, 3],
+    ["'2026-10", 3, "Lince Feliz", 99999, 3, 4],
+    ["'2026-11", 4, "Zorro Ágil", 99999, 4, 4],
+  ]) tab.appendRow([new Date(), ...row]);
+  const original = JSON.stringify(tab.rows);
+  const reads = [];
+  const getDataRange = tab.getDataRange;
+  tab.getDataRange = () => {
+    reads.push({ locked: game.events.lastIndexOf("lock") > game.events.lastIndexOf("release"), lastEvent: game.events.at(-1) });
+    return getDataRange();
+  };
+  const lock = "1,2,3";
+  const first = add(game, { grade: "3", key: keys[2], points: "200", lock });
+  const top = [
+    { name: "Lobo Leal", points: 300 },
+    { name: "Tigre Veloz", points: 200 },
+    { name: "Panda Veloz", points: 200 },
+    { name: "Tigre Veloz", points: 200, from: 2 },
+    { name: "León Feliz", points: 90000, level: 3 },
+  ];
+  const ownHash = game.rows().at(-1)[7];
+  check(same(first, expectedAdd(3, "2026-11", top, expectedMe("Tigre Veloz", 200, 4, 5)))
+    && JSON.stringify(tab.rows.slice(0, -1)) === original && validHash(ownHash, lock)
+    && noLockLeak(first, [lock, ...ownHash.split(":")]),
+    "S1 a locked row's exact position respects stable ties, level order, month and grade without exposing private fields");
+  check(reads.length === 2 && reads.every((read) => read.locked) && reads[1].lastEvent === "flush",
+    "S1 the stored row and ordered result are read after flushing while the write lock is held");
+  const before = allSheets(game);
+  const lower = add(game, { grade: "3", key: keys[3], points: "100", lock });
+  check(same(lower, expectedAdd(3, "2026-11", top, expectedMe("Tigre Veloz", 200, 4, 5))) && allSheets(game) === before,
+    "S1 a lower run returns the stored best and its position without changing either sheet");
+
+  const third = add(game, { grade: "3", key: keys[3], animal: "Águila", adjective: "Feliz", level: "3", points: "90000", lock: "4,5,6" });
+  const topThird = [...top, { name: "Águila Feliz", points: 90000, level: 3 }];
+  check(same(third, expectedAdd(3, "2026-11", topThird, expectedMe("Águila Feliz", 90000, 6, 6, 3))),
+    "S1 a tied level-3 result follows every level-4 result and includes only its own level");
+  const beforeThird = allSheets(game);
+  const lowerThird = add(game, { grade: "3", key: keys[3], animal: "Águila", adjective: "Feliz", level: "3", points: "80000", lock: "4,5,6" });
+  check(same(lowerThird, expectedAdd(3, "2026-11", topThird, expectedMe("Águila Feliz", 90000, 6, 6, 3))) && allSheets(game) === beforeThird,
+    "S1 a lower level-3 run keeps its stored level-3 best and position without writes");
+  const fourth = add(game, { grade: "3", key: keys[3], animal: "Águila", adjective: "Feliz", points: "10", lock: "4,5,6" });
+  const topFourth = [...top.slice(0, 4), { name: "Águila Feliz", points: 10 }, top[4]];
+  check(same(fourth, expectedAdd(3, "2026-11", topFourth, expectedMe("Águila Feliz", 10, 5, 6))),
+    "S1 finishing level 4 moves the pupil ahead of level 3 even with fewer points");
+
+  const stale = add(game, { grade: "3", key: keys[3], points: "200" });
+  const topStale = [...top.slice(0, 4), { name: "Tigre Veloz", points: 200 }, ...topFourth.slice(4)];
+  check(same(stale, expectedAdd(3, "2026-11", topStale, expectedMe("Tigre Veloz", 200, 5, 7)))
+    && !game.rows().at(-1)[7] && game.rows().find((row) => row[7] === ownHash)[4] === 200,
+    "S1 a stale unlocked add identifies its newly appended row, not an equal-score namesake");
+  check(same(game.json({ action: "top", grade: "3" }), expectedAdd(3, "2026-11", topStale)),
+    "S1 the public top action remains unchanged and has no personal result");
+}
+
+function ownPositionOutsideTop() {
+  const game = load();
+  const keys = game.keys();
+  const tab = game.context.SpreadsheetApp.getActiveSpreadsheet().insertSheet("Ranking");
+  tab.appendRow(["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno", "Nivel", "Candado"]);
+  const leaders = Array.from({ length: 16 }, (_, i) => ({ name: `Piloto ${i + 1}`, points: 2000 - i * 10 }));
+  for (const entry of leaders) tab.appendRow([new Date(), "'2026-11", 3, entry.name, entry.points, 3, 4, ""]);
+  tab.appendRow([new Date(), "'2026-10", 3, "Other month", 99999, 3, 4, ""]);
+  tab.appendRow([new Date(), "'2026-11", 4, "Other grade", 99999, 4, 4, ""]);
+  const result = add(game, { grade: "3", key: keys[3], points: "1450", lock: "3,0,7" });
+  check(same(result, expectedAdd(3, "2026-11", leaders.slice(0, 10), expectedMe("Tigre Veloz", 1450, 17, 17)))
+    && game.rows().length === 19 && !result.top.some((entry) => entry.name === "Tigre Veloz"),
+    "S1 a pupil outside the top ten receives position 17 and the full current-grade monthly total");
+  check(same(game.json({ action: "top", grade: "3" }), expectedAdd(3, "2026-11", leaders.slice(0, 10))),
+    "S1 the top action still returns only ten public entries and no personal result");
 }
 
 function lockRejections() {
@@ -683,11 +769,11 @@ function lockRejections() {
   const brake = load();
   const key = brake.keys()[5];
   add(brake, { key, lock: "1,2,3" });
-  const locked = snapshot(brake);
+  const locked = allSheets(brake);
   let taken = 0;
   for (let i = 0; i < 29; i++) if (same(add(brake, { key, lock: "3,2,1" }), { ok: false, error: "name taken" })) taken++;
   check(taken === 29 && same(add(brake, { key, lock: "1,2,3" }), { ok: false, error: "too many" })
-    && snapshot(brake) === locked && brake.rows().length === 1, "S5 wrong locks count toward the existing rate limit, without writes");
+    && allSheets(brake) === locked && brake.rows().length === 1, "S5 wrong locks count toward the existing rate limit, without writes or a personal result");
 }
 
 lists();
@@ -712,6 +798,8 @@ lockedBest();
 lockedScopesAndLegacy();
 differentNames();
 dateCellsAndForgottenLock();
+ownPosition();
+ownPositionOutsideTop();
 lockRejections();
 console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 process.exit(failCount ? 1 : 0);

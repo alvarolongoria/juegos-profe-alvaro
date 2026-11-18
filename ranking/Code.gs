@@ -348,10 +348,10 @@ function monthOf(value) {
   return value instanceof Date ? Utilities.formatDate(value, TIME_ZONE, "yyyy-MM") : String(value);
 }
 
-function topOf(grade) {
-  var month = currentMonth();
+function topOf(grade, targetRow, month) {
+  month = month || currentMonth();
   var rows = sheet().getDataRange().getValues().slice(1);
-  var entries = [];
+  var entries = [], target = null;
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i];
     if (monthOf(row[1]) !== month || Number(row[2]) !== grade) continue;
@@ -363,10 +363,17 @@ function topOf(grade) {
     var real = readGrade(row[5]);
     if (real !== null && real !== grade) entry.from = real;
     entries.push(entry);
+    if (i + 2 === targetRow) target = entry;
   }
   // Finishing level 4 always counts more than stopping at level 3, then points decide.
   entries.sort(function (a, b) { return (b.level === 3 ? 0 : 1) - (a.level === 3 ? 0 : 1) || b.points - a.points; });
-  return { month: month, top: entries.slice(0, TOP_SIZE) };
+  var result = { month: month, top: entries.slice(0, TOP_SIZE) };
+  if (target) {
+    // Identify the actual row, not its name: older unlocked rows may have the same name and score.
+    result.me = { name: target.name, points: target.points, position: entries.indexOf(target) + 1, total: entries.length };
+    if (target.level === 3) result.me.level = 3;
+  }
+  return result;
 }
 
 function top(params) {
@@ -396,7 +403,7 @@ function add(params) {
     if (typeof params.lock !== "string" || !/^(?:\d|1[01]),(?:\d|1[01]),(?:\d|1[01])$/.test(params.lock)) return { ok: false, error: "bad lock" };
     emojiLock = params.lock;
   }
-  var refused = withLock(function () {
+  return withLock(function () {
     // A simple brake against someone flooding the sheet or guessing keys.
     var cache = CacheService.getScriptCache();
     var slot = "adds-" + Math.floor(Date.now() / 60000);
@@ -429,16 +436,18 @@ function add(params) {
     }
     // The apostrophe keeps the month as text, so Sheets never turns it into a date.
     var values = [new Date(), "'" + month, grade, name, Number(params.points), real, level, stored];
-    if (rowIndex < 0) tab.appendRow(values);
-    else {
+    if (rowIndex < 0) {
+      tab.appendRow(values);
+      rowIndex = tab.getLastRow();
+    } else {
       var oldLevel = oldRow[6] === "" || oldRow[6] === undefined ? 4 : Number(oldRow[6]);
       if (level > oldLevel || (level === oldLevel && Number(params.points) > Number(oldRow[4]))) {
         tab.getRange(rowIndex, 1, 1, HEADER.length).setValues([values]);
       }
     }
-    return null;
+    // Read the written row and ranking together before another add can change either.
+    SpreadsheetApp.flush();
+    var found = topOf(grade, rowIndex, month);
+    return { ok: true, grade: grade, month: found.month, top: found.top, me: found.me };
   });
-  if (refused) return refused;
-  var found = topOf(grade);
-  return { ok: true, grade: grade, month: found.month, top: found.top };
 }
