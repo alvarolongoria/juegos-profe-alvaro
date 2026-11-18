@@ -90,6 +90,12 @@
       #ranking ol:empty, #ranking-preview ol:empty { display: none; }
       #ranking li, #ranking-preview li { padding: 2px 5px; overflow-wrap: anywhere; }
       #ranking .ranking-saved { border-radius: 6px; background: #ffda55; color: #142341; font-weight: bold; }
+      .ranking-warning { width: min(480px, calc(100% - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 20px; border: 3px solid #24334b; border-radius: 18px; background: #fff7e4; color: #24334b; text-align: center; }
+      .ranking-warning::backdrop { background: #142341aa; }
+      .ranking-warning h2 { margin: 0 0 12px; font-size: 22px; }
+      .ranking-warning p { margin: 0 0 18px; font-size: 18px; }
+      .ranking-warning-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+      .ranking-warning button { flex: 1 1 170px; min-height: 44px; padding: 10px; border: 2px solid #24334b; border-radius: 9px; background: #b9eff8; color: #24334b; font: inherit; font-weight: bold; cursor: pointer; }
       .grade-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; max-width: 760px; }
       .grade-row .play-btn { width: 96px; height: 96px; font-size: 36px; font-weight: bold; }
       @keyframes level-banner { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
@@ -964,6 +970,8 @@
 
       // Grades that may also enter the ranking after level 3 (the server keeps the same list).
       const RANKING_LEVEL_THREE_GRADES = [3];
+      // A known server failure must never make the warning an obstacle to play.
+      let rankingAvailable = true;
 
       // Names come from the server: the result is only ever used as text.
       function rankingLabel(entry, resultGrade) {
@@ -997,6 +1005,7 @@
           if (!response.ok) throw new Error("Ranking request failed");
           const result = await response.json();
           if (!result || result.ok !== true || !Array.isArray(result.top)) throw new Error("Ranking response failed");
+          rankingAvailable = true;
           message.textContent = result.top.length ? "" : "Todavía no hay nadie este mes. ¡Sé el primero!";
           for (const entry of result.top) {
             const item = document.createElement("li");
@@ -1004,6 +1013,7 @@
             list.appendChild(item);
           }
         } catch {
+          rankingAvailable = false;
           message.textContent = "No se pudo cargar el ranking ahora.";
         }
         await overlay;
@@ -1104,7 +1114,68 @@
         section.append(title, details, form, message, list);
         layer.insertBefore(section, layer.querySelector(".play-btn"));
 
-        let submitted = false, saving = false, requestVersion = 0, saved = null;
+        let submitted = false, saving = false, requestVersion = 0, saved = null, saveFailed = false;
+        let lastFormFocus = animal, warning = null, leavingWithoutSaving = false;
+        form.addEventListener("focusin", (event) => { lastFormFocus = event.target; });
+        function returnToForm() {
+          if (!warning) return;
+          warning.close();
+          warning.remove();
+          warning = null;
+          if (!section.isConnected) return;
+          const target = lastFormFocus.isConnected && !lastFormFocus.matches(":disabled") ? lastFormFocus : animal;
+          target.focus({ preventScroll: true });
+        }
+        const play = layer.querySelector(".play-btn");
+        // Capture the click before the shared overlay resolves, including keyboard activation.
+        play.addEventListener("click", (event) => {
+          if (leavingWithoutSaving || saved || saveFailed || !rankingAvailable || !section.isConnected) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (warning) return;
+          warning = document.createElement("dialog");
+          warning.className = "ranking-warning";
+          warning.setAttribute("aria-labelledby", "ranking-warning-title");
+          warning.setAttribute("aria-describedby", "ranking-warning-description");
+          const title = document.createElement("h2");
+          title.id = "ranking-warning-title";
+          title.textContent = "¡Todavía no has guardado tu puntuación!";
+          const description = document.createElement("p");
+          description.id = "ranking-warning-description";
+          description.textContent = `Si juegas otra vez, estos ${resultScore} puntos no entrarán en el ranking.`;
+          const actions = document.createElement("div");
+          actions.className = "ranking-warning-actions";
+          const saveFirst = document.createElement("button");
+          saveFirst.type = "button";
+          saveFirst.textContent = "Guardar primero";
+          const playAnyway = document.createElement("button");
+          playAnyway.type = "button";
+          playAnyway.textContent = "Jugar sin guardar";
+          actions.append(saveFirst, playAnyway);
+          warning.append(title, description, actions);
+          layer.appendChild(warning);
+          saveFirst.addEventListener("click", returnToForm);
+          warning.addEventListener("cancel", (cancelEvent) => { cancelEvent.preventDefault(); returnToForm(); });
+          warning.addEventListener("keydown", (keyEvent) => {
+            if (keyEvent.key !== "Tab") return;
+            if (keyEvent.shiftKey && document.activeElement === saveFirst) {
+              keyEvent.preventDefault();
+              playAnyway.focus();
+            } else if (!keyEvent.shiftKey && document.activeElement === playAnyway) {
+              keyEvent.preventDefault();
+              saveFirst.focus();
+            }
+          });
+          playAnyway.addEventListener("click", () => {
+            warning.close();
+            warning.remove();
+            warning = null;
+            leavingWithoutSaving = true;
+            play.click();
+          });
+          warning.showModal();
+          saveFirst.focus({ preventScroll: true });
+        }, true);
         function updateLock() {
           const picked = chosen.map((index) => RANKING_EMOJIS[index]).join(" ");
           selection.textContent = `Tus emojis: ${picked || "ninguno"} (${chosen.length}/3)`;
@@ -1166,14 +1237,22 @@
           message.textContent = "Guardando…";
           try {
             const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim(), lock: chosen.join(","), ...(resultLevel === 3 ? { level: 3 } : {}) });
+            rankingAvailable = true;
             saved = { name, points: resultScore };
             if (version === requestVersion) render(top);
+            returnToForm();
           } catch (error) {
             if (error instanceof RetryableRefusal) {
+              rankingAvailable = true;
               submitted = false;
               updateLock();
               message.textContent = error.text;
-            } else if (version === requestVersion) message.textContent = "No se pudo guardar ahora. Inténtalo más tarde.";
+            } else {
+              saveFailed = true;
+              rankingAvailable = false;
+              if (version === requestVersion) message.textContent = "No se pudo guardar ahora. Inténtalo más tarde.";
+              returnToForm();
+            }
           } finally {
             saving = false;
             view.disabled = false;
@@ -1185,9 +1264,16 @@
           message.textContent = "Cargando ranking…";
           try {
             const top = await request({ action: "top", grade: resultGrade });
-            if (version === requestVersion) render(top);
+            if (version === requestVersion) {
+              rankingAvailable = true;
+              render(top);
+            }
           } catch {
-            if (version === requestVersion) message.textContent = "No se pudo cargar el ranking ahora. Inténtalo más tarde.";
+            if (version === requestVersion) {
+              rankingAvailable = false;
+              message.textContent = "No se pudo cargar el ranking ahora. Inténtalo más tarde.";
+              returnToForm();
+            }
           } finally {
             if (!saving) view.disabled = false;
           }

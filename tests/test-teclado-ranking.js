@@ -69,13 +69,23 @@ async function finishWithClock(page) {
 
 // The ranking preview after choosing the grade asks for the top once. Unless a test is about
 // that screen, an empty answer is given here so the test's own handler only sees its own traffic.
-async function gameWithClock(handler, { previewHandled = false } = {}) {
+async function gameWithClock(handler, { previewHandled = false, touch = false } = {}) {
   const game = await openGame("juegos/teclado.html");
-  const { page } = game;
+  let { page } = game;
+  if (touch) {
+    const url = page.url();
+    const context = await game.browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 768, height: 1024 } });
+    await page.close();
+    game.page = page = await context.newPage();
+    game.external = [];
+    page.on("request", (request) => { if (!request.url().startsWith("file://")) game.external.push(request.url()); });
+    await page.addInitScript(() => { window.RANKING_URL = ""; });
+    await page.goto(url);
+  }
   game.pageErrors = [];
   page.on("pageerror", (e) => game.pageErrors.push(e.message));
   page.setDefaultTimeout(5000);
-  await page.setViewportSize({ width: 1024, height: 600 });
+  if (!touch) await page.setViewportSize({ width: 1024, height: 600 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   if (handler) {
     await page.addInitScript(() => { window.RANKING_URL = "https://ranking.test/exec"; });
@@ -107,6 +117,8 @@ async function win(page, grade, checkEarly = false) {
     if (!result.finished) throw new Error(`Could not finish level ${level + 1}`);
     if (grade === 3 && level === 2 && await page.locator("#ranking").count()) {
       await page.locator(".overlay .play-btn").click({ force: true });
+      const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+      if (await warning.count()) await warning.getByRole("button", { name: "Jugar sin guardar" }).click();
     }
   }
   // The trophy flight of the last win moves the overlay; click only once it lands.
@@ -137,6 +149,8 @@ async function withoutUrl() {
       "S11 an empty URL leaves the final overlay without any ranking UI");
     check(game.external.length === 0, `S11 an empty URL makes no external requests (${game.external.join(", ")})`);
     await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.locator("dialog[open]").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0"),
+      "S6 an absent ranking never warns and replay starts level 1");
     await finish(game);
   } finally {
     await game.browser.close();
@@ -145,12 +159,14 @@ async function withoutUrl() {
 
 async function saveAndSafety() {
   const requests = [];
+  let releaseSave;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
   const game = await gameWithClock(async (route) => {
     const url = new URL(route.request().url());
     requests.push({ method: route.request().method(), url });
     if (url.searchParams.get("action") === "add") {
-      // Keep the request in flight briefly so rapid duplicate submissions are exercised.
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Keep the request in flight while testing duplicate submits and replay.
+      await saveGate;
       const name = `${url.searchParams.get("animal")} ${url.searchParams.get("adjective")}`;
       const points = Number(url.searchParams.get("points"));
       await reply(route, response([
@@ -225,7 +241,17 @@ async function saveAndSafety() {
     await ranking.locator("form").evaluate((form) => {
       for (let i = 0; i < 3; i++) form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
+    await page.locator(".overlay .play-btn").click({ force: true });
+    const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+    const warned = await warning.count() === 1;
+    check(warned && requests.length === 1, "S6 a save in flight is not yet successful and warns without another request");
+    if (!warned) return;
+    releaseSave();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 3, null, { polling: 100 });
+    const warningClosed = await warning.count() === 0;
+    check(warningClosed && await page.evaluate(() => document.querySelector("#ranking form").contains(document.activeElement)),
+      "S6 a save that succeeds while the warning is open closes it and returns focus to the form");
+    if (!warningClosed) await warning.getByRole("button", { name: "Guardar primero" }).click();
     await ranking.locator("form").evaluate((form) => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     await page.waitForTimeout(100);
     const adds = requests.filter((r) => r.url.searchParams.get("action") === "add");
@@ -243,18 +269,25 @@ async function saveAndSafety() {
     check((await rows.nth(2).textContent()).includes('<img src=x onerror="window.rankingXss=1">')
       && await rows.nth(2).locator("img").count() === 0 && !await page.evaluate(() => window.rankingXss),
       "S11 a hostile returned name is displayed as text, never interpreted as HTML");
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.locator("dialog[open]").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0"),
+      "S6 a successful final save plays immediately without a warning");
     noExceptions(game, "S11 successful save");
   } finally {
+    releaseSave();
     await game.browser.close();
   }
 }
 
 async function failedSave(kind) {
   const requests = [];
+  let releaseSave;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
   const game = await gameWithClock(async (route) => {
     const url = new URL(route.request().url());
     requests.push(url);
     if (url.searchParams.get("action") === "add") {
+      await saveGate;
       if (kind === "network") await route.abort();
       else await reply(route, { ok: false, error: "server error" });
     } else await reply(route, response([], 3));
@@ -268,7 +301,16 @@ async function failedSave(kind) {
     if (!present) return;
     await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.locator(".overlay .play-btn").click({ force: true });
+    const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+    const warned = await warning.count() === 1;
+    check(warned, `S6 a ${kind} save pending response still warns`);
+    if (!warned) return;
+    releaseSave();
     await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("No se pudo guardar ahora. Inténtalo más tarde."), null, { polling: 100 });
+    const warningClosed = await warning.count() === 0;
+    check(warningClosed, `S6 a ${kind} save failure closes the pending warning`);
+    if (!warningClosed) await warning.getByRole("button", { name: "Guardar primero" }).click();
     check((await ranking.innerText()).includes("No se pudo guardar ahora. Inténtalo más tarde."), `S11 ${kind} error shows the gentle save message`);
     check(await ranking.getByRole("button", { name: "Guardar", exact: true }).isDisabled(), `S11 ${kind} error does not allow a second submission`);
     await ranking.locator("form").evaluate((form) => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
@@ -283,7 +325,9 @@ async function failedSave(kind) {
     if (ship) await page.keyboard.insertText((await ship.getAttribute("data-text"))[0]);
     const resumed = !!ship && await page.evaluate((el) => document.body.dataset.level === "0" && (el.dataset.typed === "1" || !el.isConnected), ship);
     check(resumed, `S11 ${kind} error leaves the new level 1 playable`);
+    check(await page.locator("dialog[open]").count() === 0, `S6 a ${kind} save failure never blocks replay with a warning`);
   } finally {
+    releaseSave();
     await game.browser.close();
   }
 }
@@ -439,7 +483,8 @@ async function failedView() {
     if (url.searchParams.get("action") === "add") return reply(route, response([], 4));
     topCalls++;
     if (topCalls === 1) return route.abort();
-    return reply(route, { ok: false, error: "server error" });
+    if (topCalls === 2) return reply(route, { ok: false, error: "server error" });
+    return reply(route, response([], 4));
   });
   try {
     const { page } = game;
@@ -456,10 +501,18 @@ async function failedView() {
       check(await view.isEnabled() && await ranking.getByRole("button", { name: "Guardar", exact: true }).isEnabled(),
         `S11 ${kind} viewing error is gentle and leaves both actions usable`);
     }
+    await view.click();
+    await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("Todavía no hay nadie este mes"), null, { polling: 100 });
+    await page.locator(".overlay .play-btn").click({ force: true });
+    const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+    const warned = await warning.count() === 1;
+    check(warned, "S6 a recovered server warns again when the score is still unsaved");
+    if (!warned) return;
+    await warning.getByRole("button", { name: "Guardar primero" }).click();
     await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("Todavía no hay nadie este mes"), null, { polling: 100 });
-    check(topCalls === 2, "S11 a failed view can be retried and does not prevent saving");
+    check(topCalls === 3, "S11 a failed view can be retried and does not prevent saving");
     noExceptions(game, "S11 viewing errors");
   } finally {
     await game.browser.close();
@@ -605,6 +658,12 @@ async function lockPickerAndRetry() {
     check(adds.length === 1 && adds[0].animal === "Tigre" && adds[0].lock === "3,0,7" && await save.isEnabled()
       && await ranking.getByLabel("Clave de clase").inputValue() === "sol" && (await selection.innerText()).includes("🚀 🍎 🐱")
       && await status.textContent() === refusal, "S5 name taken shows the exact message and preserves the form for retry");
+    await page.locator(".overlay .play-btn").click({ force: true });
+    const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+    const warned = await warning.count() === 1;
+    check(warned && adds.length === 1, "S6 a retryable refusal is still unsaved and warns without sending a request");
+    if (!warned) return;
+    await warning.getByRole("button", { name: "Guardar primero" }).click();
     await ranking.locator('select[name="animal"]').selectOption("Panda");
     await save.click();
     await page.waitForFunction(() => document.querySelector('#ranking [role="status"]')?.textContent.startsWith("Ese nombre ya es"), null, { polling: 100 });
@@ -616,6 +675,9 @@ async function lockPickerAndRetry() {
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
     check(adds.length === 3 && adds[2].animal === "Panda" && adds[2].lock === "3,0,3" && await save.isDisabled()
       && (await ranking.locator("ol li").textContent()).startsWith("Panda Veloz"), "S5 a child can retry with corrected emojis and save once");
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.locator("dialog[open]").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0"),
+      "S6 saving after Guardar primero removes the warning on replay");
     noExceptions(game, "S5 lock picker and retry");
   } finally {
     await game.browser.close();
@@ -656,7 +718,8 @@ async function levelThree() {
       "S6 the list marks a level-4 finish with 🏆 and a level-3 one with 🥇");
     await page.locator(".overlay .play-btn").click({ force: true });
     await page.waitForFunction(() => document.body.dataset.level === "3" && !document.querySelector(".overlay"), null, { polling: 100 });
-    check(await page.locator("#ranking").count() === 0, "S6 after saving, the play button goes on to level 4");
+    check(await page.locator("#ranking").count() === 0 && await page.locator("dialog[open]").count() === 0,
+      "S6 after saving, the play button goes on to level 4 without a warning");
     const fourth = await finishWithClock(page);
     await page.waitForFunction(() => !document.querySelector(".trophy-flight"), null, { polling: 100 });
     check(fourth.finished && await ranking.count() === 1 && !(await ranking.innerText()).includes("Nivel 3 superado"),
@@ -670,6 +733,216 @@ async function levelThree() {
     noExceptions(game, "S6 level three");
   } finally {
     await game.browser.close();
+  }
+}
+
+// S6 (unsaved score): keep the actual form alive, including a retryable error.
+async function unsavedFinalWarning() {
+  const requests = [];
+  const game = await gameWithClock(async (route) => {
+    requests.push(new URL(route.request().url()));
+    await reply(route, { ok: false, error: "name taken" });
+  });
+  try {
+    const { page } = game;
+    await win(page, 5);
+    const ranking = page.locator("#ranking");
+    const animal = ranking.locator('select[name="animal"]');
+    const adjective = ranking.locator('select[name="adjective"]');
+    const key = ranking.getByLabel("Clave de clase");
+    await animal.selectOption("Panda");
+    await adjective.selectOption("Elegante");
+    await key.fill("luz");
+    await fillLock(ranking, [3, 0, 7]);
+    await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
+    const refusal = "Ese nombre ya es de un compañero con otros emojis. Elige otro nombre o revisa tus emojis.";
+    await page.waitForFunction((text) => document.querySelector('#ranking [role="status"]')?.textContent === text, refusal, { polling: 100 });
+    const score = await pointsOnScreen(page);
+    const originalRequests = requests.length;
+    await page.evaluate(() => { window.s6OriginalForm = document.querySelector("#ranking form"); });
+    const formState = () => ranking.evaluate((section) => ({
+      animal: section.querySelector('[name="animal"]').value,
+      adjective: section.querySelector('[name="adjective"]').value,
+      key: section.querySelector('[name="key"]').value,
+      emojis: section.querySelector(".ranking-lock-selection").textContent,
+      message: section.querySelector('[role="status"]').textContent,
+      sameForm: section.querySelector("form") === window.s6OriginalForm,
+    }));
+    const before = await formState();
+    const play = page.locator(".overlay .play-btn");
+    await key.focus();
+    await play.click({ force: true });
+    const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+    const present = await warning.count() === 1;
+    check(present && await page.evaluate(() => document.body.dataset.level === "3"),
+      "S6 mouse play with an unsaved final score opens a warning instead of starting");
+    if (!present) return;
+    check(await warning.getByText("¡Todavía no has guardado tu puntuación!", { exact: true }).count() === 1
+      && await warning.getByText(`Si juegas otra vez, estos ${score} puntos no entrarán en el ranking.`, { exact: true }).count() === 1
+      && await warning.getByRole("button", { name: "Guardar primero", exact: true }).count() === 1
+      && await warning.getByRole("button", { name: "Jugar sin guardar", exact: true }).count() === 1,
+      `S6 warning uses the exact text and this run's real score (${score})`);
+    check(await warning.evaluate((dialog) => dialog.contains(document.activeElement)), "S6 focus moves into the warning");
+    check(JSON.stringify(await formState()) === JSON.stringify(before) && requests.length === originalRequests,
+      "S6 opening the warning preserves every form value and error, and sends no request");
+    for (const size of [{ width: 320, height: 568 }, { width: 360, height: 780 }, { width: 768, height: 1024 }]) {
+      await page.setViewportSize(size);
+      const layout = await warning.evaluate((dialog) => {
+        const rect = dialog.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+          buttons: [...dialog.querySelectorAll("button")].map((button) => {
+            const b = button.getBoundingClientRect();
+            return { left: b.left, top: b.top, right: b.right, bottom: b.bottom, width: b.width, height: b.height };
+          }), scrollWidth: document.documentElement.scrollWidth };
+      });
+      check(layout.left >= 0 && layout.top >= 0 && layout.right <= size.width && layout.bottom <= size.height
+        && layout.scrollWidth <= size.width && layout.buttons.length === 2
+        && layout.buttons.every((b) => b.left >= 0 && b.top >= 0 && b.right <= size.width && b.bottom <= size.height && b.width >= 44 && b.height >= 44),
+        `S6 warning and both 44px touch targets fit ${size.width}x${size.height} (${JSON.stringify(layout)})`);
+    }
+    await warning.getByRole("button", { name: "Guardar primero" }).click();
+    await page.waitForTimeout(600);
+    check(await warning.count() === 0 && await key.evaluate((el) => document.activeElement === el)
+      && JSON.stringify(await formState()) === JSON.stringify(before) && requests.length === originalRequests,
+      "S6 Guardar primero returns focus to the unchanged form without a request");
+    for (const keyName of ["Enter", "Space"]) {
+      await play.focus();
+      await page.keyboard.press(keyName);
+      const opened = await warning.count() === 1;
+      check(opened && await page.evaluate(() => document.body.dataset.level === "3"),
+        `S6 ${keyName} on play cannot bypass the warning`);
+      if (!opened) return;
+      await warning.getByRole("button", { name: "Guardar primero" }).focus();
+      await page.keyboard.press("Shift+Tab");
+      check(await warning.evaluate((dialog) => dialog.contains(document.activeElement)), `S6 ${keyName} warning keeps keyboard focus inside`);
+      await warning.getByRole("button", { name: "Guardar primero" }).click();
+    }
+    await play.focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    check(await warning.count() === 0 && await key.evaluate((el) => document.activeElement === el)
+      && JSON.stringify(await formState()) === JSON.stringify(before), "S6 Escape returns to the unchanged form");
+    await play.focus();
+    await page.keyboard.press("Enter");
+    await warning.getByRole("button", { name: "Jugar sin guardar" }).focus();
+    await page.keyboard.press("Space");
+    check(await page.locator(".overlay").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0")
+      && await page.locator("dialog[open]").count() === 0 && requests.length === originalRequests,
+      "S6 keyboard Jugar sin guardar starts level 1 and the warning sends no request");
+    noExceptions(game, "S6 final unsaved warning");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+async function unsavedCheckpointTouch() {
+  const requests = [];
+  const game = await gameWithClock(async (route) => {
+    requests.push(new URL(route.request().url()));
+    await reply(route, response([], 3));
+  }, { touch: true });
+  try {
+    const { page } = game;
+    await chooseGrade(page, 3);
+    check(await page.evaluate(() => matchMedia("(pointer: coarse)").matches), "S6 checkpoint runs in tablet touch mode");
+    await page.locator(".key-catcher").focus();
+    for (let level = 0; level < 3; level++) {
+      const result = await finishWithClock(page);
+      if (!result.finished) throw new Error(`Could not finish checkpoint level ${level + 1}`);
+    }
+    const ranking = page.locator("#ranking");
+    const score = await pointsOnScreen(page);
+    await ranking.locator('select[name="animal"]').selectOption("Panda");
+    await ranking.locator('select[name="adjective"]').selectOption("Feliz");
+    await ranking.getByLabel("Clave de clase").fill("sol");
+    await fillLock(ranking, [2, 1, 0]);
+    const beforeRequests = requests.length;
+    await page.evaluate(() => {
+      window.s6TouchPointers = [];
+      document.addEventListener("pointerdown", (event) => window.s6TouchPointers.push(event.pointerType), true);
+    });
+    async function tap(locator) {
+      await locator.scrollIntoViewIfNeeded();
+      const box = await locator.boundingBox();
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    }
+    const play = page.locator(".overlay .play-btn");
+    await tap(play);
+    const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+    const present = await warning.count() === 1;
+    check(present && await page.evaluate(() => document.body.dataset.level === "2" && window.s6TouchPointers.includes("touch")),
+      "S6 a real touch at the 3º checkpoint opens the warning without starting level 4");
+    if (!present) return;
+    check(await warning.getByText(`Si juegas otra vez, estos ${score} puntos no entrarán en el ranking.`, { exact: true }).count() === 1,
+      `S6 the 3º checkpoint warning contains its real level-3 score (${score})`);
+    await tap(warning.getByRole("button", { name: "Guardar primero" }));
+    check(await warning.count() === 0 && await ranking.locator('select[name="animal"]').inputValue() === "Panda"
+      && await ranking.locator('select[name="adjective"]').inputValue() === "Feliz" && await ranking.getByLabel("Clave de clase").inputValue() === "sol"
+      && (await ranking.locator(".ranking-lock-selection").innerText()).includes("🐶 ⭐ 🍎") && requests.length === beforeRequests,
+      "S6 touch Guardar primero preserves the checkpoint form without a request");
+    await tap(play);
+    await tap(warning.getByRole("button", { name: "Jugar sin guardar" }));
+    check(await page.locator(".overlay").count() === 0 && await page.evaluate(() => document.body.dataset.level === "3")
+      && await page.locator("dialog[open]").count() === 0 && requests.length === beforeRequests,
+      "S6 touch Jugar sin guardar continues to level 4 without a request");
+    noExceptions(game, "S6 checkpoint touch");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+async function unavailableAndOrdinaryPlay() {
+  // The preview already exposed a network failure before the locally built form appears.
+  const previewFailed = await gameWithClock((route) => route.abort(), { previewHandled: true });
+  try {
+    const { page } = previewFailed;
+    await win(page, 2);
+    check(await page.locator("#ranking").count() === 1, "S6 preview failure scenario reaches the final form");
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.locator("dialog[open]").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0"),
+      "S6 a failed ranking preview never blocks replay with a warning");
+    noExceptions(previewFailed, "S6 preview failure");
+  } finally {
+    await previewFailed.browser.close();
+  }
+  const viewFailed = await gameWithClock((route) => reply(route, { ok: false, error: "server error" }));
+  try {
+    const { page } = viewFailed;
+    await win(page, 2);
+    await page.locator("#ranking").getByRole("button", { name: "Ver ranking" }).click();
+    await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("No se pudo cargar el ranking ahora."), null, { polling: 100 });
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.locator("dialog[open]").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0"),
+      "S6 a failed ranking view never blocks replay with a warning");
+    noExceptions(viewFailed, "S6 viewing failure");
+  } finally {
+    await viewFailed.browser.close();
+  }
+  const missingForm = await gameWithClock((route) => reply(route, response()));
+  try {
+    const { page } = missingForm;
+    await win(page, 2);
+    await page.locator("#ranking").evaluate((section) => section.remove());
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.locator("dialog[open]").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0"),
+      "S6 replay is never blocked if the ranking form is absent");
+    noExceptions(missingForm, "S6 missing form");
+  } finally {
+    await missingForm.browser.close();
+  }
+  const ordinary = await gameWithClock((route) => reply(route, response()));
+  try {
+    const { page } = ordinary;
+    await chooseGrade(page, 6);
+    await page.evaluate(() => window.advanceFrames(50));
+    await page.keyboard.insertText("#########");
+    check((await page.locator(".overlay .overlay-text").textContent()).includes("Inténtalo otra vez"), "S6 ordinary loss shows its normal summary");
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.locator("dialog[open]").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0"),
+      "S6 an ordinary loss retries without a ranking warning even when the ranking URL is set");
+    noExceptions(ordinary, "S6 ordinary replay");
+  } finally {
+    await ordinary.browser.close();
   }
 }
 
@@ -698,7 +971,7 @@ async function startPreview() {
       "S7 the game has not started while the preview is shown");
     await page.click(".overlay .play-btn", { force: true });
     await page.waitForFunction(() => document.body.dataset.level === "0" && !document.querySelector(".overlay"), null, { polling: 100 });
-    check(true, "S7 the play button starts level 1");
+    check(await page.locator("dialog[open]").count() === 0, "S7/S6 the preview play button starts level 1 without a warning");
     noExceptions(game, "S7 preview");
   } finally {
     await game.browser.close();
@@ -721,7 +994,8 @@ async function startPreview() {
 (async () => {
   for (const [label, run] of [["lock picker and retry", lockPickerAndRetry], ["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
-    ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["start preview", startPreview]]) {
+    ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree],
+    ["S6 unsaved final warning", unsavedFinalWarning], ["S6 unsaved checkpoint touch", unsavedCheckpointTouch], ["S6 unavailable and ordinary play", unavailableAndOrdinaryPlay], ["start preview", startPreview]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }
   }
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
