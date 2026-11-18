@@ -105,6 +105,9 @@ async function win(page, grade, checkEarly = false) {
         `S11 no ranking after level ${level + 1}`);
     }
     if (!result.finished) throw new Error(`Could not finish level ${level + 1}`);
+    if (grade === 3 && level === 2 && await page.locator("#ranking").count()) {
+      await page.locator(".overlay .play-btn").click({ force: true });
+    }
   }
   // The trophy flight of the last win moves the overlay; click only once it lands.
   await page.waitForFunction(() => !document.querySelector(".trophy-flight"), null, { polling: 100 });
@@ -258,8 +261,8 @@ async function failedSave(kind) {
     await page.evaluate(() => window.advanceFrames(50));
     const ship = await page.locator(".ship").first().elementHandle();
     if (ship) await page.keyboard.insertText((await ship.getAttribute("data-text"))[0]);
-    const resumed = !!ship && await page.evaluate((el) => document.body.dataset.level === "3" && (el.dataset.typed === "1" || !el.isConnected), ship);
-    check(resumed, `S11 ${kind} error leaves the repeated level playable`);
+    const resumed = !!ship && await page.evaluate((el) => document.body.dataset.level === "0" && (el.dataset.typed === "1" || !el.isConnected), ship);
+    check(resumed, `S11 ${kind} error leaves the new level 1 playable`);
   } finally {
     await game.browser.close();
   }
@@ -330,16 +333,80 @@ async function gradeOneAndRepeat() {
       && await ranking.locator(".ranking-saved").count() === 0, "S11 a score outside the top is saved without highlighting another entry");
     await page.locator(".overlay .play-btn").click({ force: true });
     const replay = await finishWithClock(page);
+    check(replay.level === "0" && replay.finished, "S11 a replay after saving starts at level 1");
+    if (replay.level === "0" && replay.finished) {
+      for (let level = 1; level < 4; level++) {
+        const result = await finishWithClock(page);
+        check(result.level === String(level) && result.finished, `S11 replay continues through level ${level + 1}`);
+      }
+    }
     ranking = page.locator("#ranking");
-    check(replay.level === "3" && replay.finished && await ranking.count() === 1
-      && !await ranking.getByRole("button", { name: "Guardar", exact: true }).isDisabled(), "S11 replaying level 4 creates a fresh chance to save");
+    check(await ranking.count() === 1 && !await ranking.getByRole("button", { name: "Guardar", exact: true }).isDisabled(),
+      "S11 completing a new run creates a fresh chance to save");
     const secondScore = await pointsOnScreen(page);
     await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
     check(adds.length === 2 && adds[1].searchParams.get("grade") === "1" && adds[1].searchParams.get("points") === String(secondScore),
       "S11 each separate win can be submitted once with its own score");
-    noExceptions(game, "S11 repeating the final level");
+    noExceptions(game, "S11 replaying a complete run");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+// S4: every grade starts a new run after the final summary, while a loss
+// retries the same level instead of returning to the beginning.
+async function replayEveryGrade() {
+  const game = await gameWithClock();
+  try {
+    const { page } = game;
+    for (const grade of [1, 2, 3, 4, 5, 6]) {
+      if (grade > 1) await page.reload();
+      await win(page, grade);
+      await page.locator(".overlay .play-btn").click({ force: true });
+      const state = await page.evaluate(() => ({
+        level: document.body.dataset.level,
+        hearts: document.body.dataset.hearts,
+        progress: document.querySelectorAll(".progress span").length,
+        filled: document.querySelectorAll('.trophy-slot[data-filled="true"]').length,
+        stats: document.querySelector("#stats").textContent,
+      }));
+      check(state.level === "0" && state.hearts === "3" && state.progress === 5 && state.filled === 4 && /Puntos: 0(?:\n|$)/.test(state.stats),
+        `S4 ${grade}º winning the last level starts a fresh level 1 and keeps earned trophies (${JSON.stringify(state)})`);
+    }
+    noExceptions(game, "S4 replay for every grade");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+async function retryLostLevel() {
+  const game = await gameWithClock();
+  try {
+    const { page } = game;
+    for (const targetLevel of [2, 3]) {
+      if (targetLevel > 2) await page.reload();
+      await chooseGrade(page, 6);
+      for (let level = 0; level < targetLevel; level++) {
+        const result = await finishWithClock(page);
+        if (!result.finished) throw new Error(`Could not reach level ${targetLevel + 1}`);
+      }
+      await page.evaluate(() => window.advanceFrames(50));
+      await page.keyboard.insertText("#########");
+      const lost = await page.locator(".overlay .overlay-text").textContent();
+      await page.locator(".overlay .play-btn").click({ force: true });
+      const state = await page.evaluate(() => ({
+        level: document.body.dataset.level,
+        hearts: document.body.dataset.hearts,
+        progress: document.querySelectorAll(".progress span").length,
+        score: document.querySelectorAll(".progress span.on").length,
+      }));
+      check(lost.includes("Inténtalo otra vez") && state.level === String(targetLevel) && state.hearts === "3"
+        && state.progress === [5, 7, 9, 12][targetLevel] && state.score === 0,
+        `S4 losing level ${targetLevel + 1} retries that same level (${JSON.stringify(state)})`);
+    }
+    noExceptions(game, "S4 retry after losing");
   } finally {
     await game.browser.close();
   }
@@ -500,6 +567,8 @@ async function levelThree() {
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction((n) => document.querySelectorAll("#ranking ol li").length === n, 2, { polling: 100 });
     check(adds.length === 2 && !("level" in adds[1]), `S6 the level-4 save sends no level, as before (${JSON.stringify(adds[1])})`);
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.evaluate(() => document.body.dataset.level === "0"), "S4 3º starts level 1 after its final ranking, not after the level-3 ranking");
     noExceptions(game, "S6 level three");
   } finally {
     await game.browser.close();
@@ -554,7 +623,7 @@ async function startPreview() {
 (async () => {
   for (const [label, run] of [["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
-    ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["start preview", startPreview]]) {
+    ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["start preview", startPreview]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }
   }
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);

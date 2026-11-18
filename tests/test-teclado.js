@@ -754,7 +754,7 @@ async function finishWithClock(page) {
 async function probeSpecial(page, random, grade = 2, hurt = false, want = null) {
   await page.reload();
   await chooseGrade(page, grade);
-  return page.evaluate(({ random, hurt, want }) => {
+  return page.evaluate(({ random, grade, hurt, want }) => {
     window.randomValue = random;
     const step = window.advanceFrames;
     const type = (el) => { for (const key of el.dataset.text) window.testKey(key); };
@@ -767,16 +767,17 @@ async function probeSpecial(page, random, grade = 2, hurt = false, want = null) 
     for (let i = 0; i < 2000; i++) {
       const special = document.querySelector(want ? `.ship[data-kind="${want}"]` : '.ship[data-kind="heart"], .ship[data-kind="ice"], .ship[data-kind="bomb"], .ship[data-kind="star"]');
       if (special) return { kind: special.dataset.kind, text: special.dataset.text, firstKind, hearts: document.body.dataset.hearts };
-      // Type a ship only when it is about to land: two ships must be able to
-      // share the sky, or the bomb and the ice never arrive (S8).
+      // Bombs and ice need two ships; a quick 1º player clears ships sooner
+      // when looking for a heart or star so an effect does not block that slot.
       const normal = [...document.querySelectorAll('.ship[data-kind="ship"], .ship[data-kind="mother"], .ship[data-kind="child"]')]
         .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
-      if (normal && normal.getBoundingClientRect().bottom > innerHeight - 170) type(normal);
+      const quick = grade === 1 && (want === "heart" || want === "star");
+      if (normal && (quick || normal.getBoundingClientRect().bottom > innerHeight - 170)) type(normal);
       if (document.querySelector(".overlay")) break;
       step(50);
     }
     return { kind: null, firstKind, hearts: document.body.dataset.hearts };
-  }, { random, hurt, want });
+  }, { random, grade, hurt, want });
 }
 
 async function calibrationAndSpecials() {
@@ -786,10 +787,31 @@ async function calibrationAndSpecials() {
   await installFrameClock(page);
   await page.reload();
   await chooseGrade(page, 1);
+  const firstGradePools = await page.evaluate(() => GRADES[1].levels.map((pool) => [...pool]));
+  const syllables = [..."mplstnrd"].flatMap((letter) => [..."aeiou"].map((vowel) => letter + vowel));
+  const originalWords = "sol pato mesa pala sopa lupa mapa tela palo lima pelo oso ala pie sal mil".split(" ");
+  const addedWords = firstGradePools[3].filter((word) => !originalWords.includes(word));
+  check(firstGradePools[0].join(" ") === "a e i o u", "1º level 1 keeps the vowels");
+  check(firstGradePools[1].join(" ") === "m p l s t n r d", "1º level 2 includes all eight letters");
+  check(JSON.stringify(firstGradePools[2]) === JSON.stringify(syllables), "1º level 3 includes all approved consonant-vowel syllables");
+  check(originalWords.every((word) => firstGradePools[3].includes(word)) && addedWords.length >= 8
+    && ["casa", "luna", "gato", "nube"].every((word) => addedWords.includes(word))
+    && addedWords.every((word) => /^[a-z]{4,5}$/.test(word)), "1º level 4 keeps its original words and adds simple 4-5 letter words");
+  const occupancy = await page.evaluate(() => {
+    const counts = [];
+    for (let i = 0; i < 320; i++) {
+      window.advanceFrames(50);
+      counts.push(document.querySelectorAll('.ship[data-kind="ship"]').length);
+    }
+    return { max: Math.max(...counts), final: counts.at(-1) };
+  });
+  check(occupancy.max === 3, `1º can hold three ships but never more (${JSON.stringify(occupancy)})`);
+  await page.reload();
+  await chooseGrade(page, 1);
   for (let level = 0; level < 4; level++) {
     const measured = await measureLevel(page);
-    if (measured) console.log(`calibration 1º level ${level + 1}: interval 4.00s, fall ${measured.fall.toFixed(2)}s`);
-    check(!!measured && Math.abs(measured.interval - 4) < 0.15 && Math.abs(measured.speed - 22 * (1 + 0.12 * level)) < 0.2, `S9 1º level ${level + 1}: original interval and speed unchanged`);
+    if (measured) console.log(`calibration 1º level ${level + 1}: interval ${measured.interval.toFixed(2)}s, fall ${measured.fall.toFixed(2)}s`);
+    check(!!measured && Math.abs(measured.interval - 3.5) < 0.15 && Math.abs(measured.speed - 25 * (1 + 0.12 * level)) < 0.2, `1º level ${level + 1}: 3.5s interval and 25 initial speed with 12% per level`);
     const result = await finishWithClock(page);
     if (result.finished && await page.locator(".overlay").count()) await pressPlay(page);
   }
@@ -1224,7 +1246,7 @@ async function arcadeContracts() {
 
   const pools1 = [
     ["a", "e", "i", "o", "u"],
-    ["m", "p", "l", "s", "t"],
+    ["m", "p", "l", "s", "t", "n", "r", "d"],
     null, // syllables: checked by shape below
     null, // short words
   ];
@@ -1233,8 +1255,8 @@ async function arcadeContracts() {
     check(await page.locator(".progress span").count() === goals[level], `1º level ${level + 1}: asks for ${goals[level]} ships`);
     const already = level === 0 ? 1 : 0;
     const seen = await playLevel(page, goals[level] - already, pools1[level], `1º level ${level + 1}`);
-    if (level === 2) check(seen.every((t) => /^[mplst][aeiou]$/.test(t)), `1º level 3 ships carry simple syllables (${seen.join(" ")})`);
-    if (level === 3) check(seen.every((t) => t.length >= 3 && t.length <= 4 && /^[a-z]+$/.test(t)), `1º level 4 ships carry 3-4 letter words (${seen.join(" ")})`);
+    if (level === 2) check(seen.every((t) => /^[mplstnrd][aeiou]$/.test(t)), `1º level 3 ships carry simple syllables (${seen.join(" ")})`);
+    if (level === 3) check(seen.every((t) => t.length >= 3 && t.length <= 5 && /^[a-z]+$/.test(t)), `1º level 4 ships carry 3-5 letter words (${seen.join(" ")})`);
     await page.waitForFunction((index) => document.querySelectorAll('.trophy-slot')[index]?.dataset.filled === 'true', level);
     check(await page.locator('.trophy-slot').nth(level).getAttribute('data-award') === ['bronze', 'silver', 'gold', 'cup'][level], `1º level ${level + 1}: correct trophy`);
     if (level < 3) {
@@ -1246,10 +1268,11 @@ async function arcadeContracts() {
       await typeChar(page, 'a');
       check(await score(page) === goals[level], 'summary ignores typing');
       await pressPlay(page);
-      check(await score(page) === 0, 'repeated level resets progress');
+      check(await score(page) === 0, 'a new run resets progress');
     }
   }
-  check(await page.locator(".progress span").count() === 12, "last level repeats");
+  check(await data(page, "level") === "0" && await page.locator(".progress span").count() === 5, "after the last level a new run starts at level 1");
+  check(await page.locator('.trophy-slot[data-filled="true"]').count() === 4, "the new run keeps the trophies already earned");
   await finish(game);
 
   // ---------- 2º: accents are required, score is shown ----------

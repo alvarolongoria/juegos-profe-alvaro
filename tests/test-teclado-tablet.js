@@ -370,28 +370,31 @@ async function desktopUnchanged() {
   await close(game, "desktop");
 }
 
-// S5 (T6): the ground is the cannon's top edge, and every ship starts on the
-// same line (y = 90) before flying down to that ground.
+// S5 (T6): on a tablet ships normally start at y = 90. A scrolled viewport
+// hides its top, so the visible travel starts eight pixels below that edge.
 const SPAWN_TOP = 90;
 
-const playState = (page) => page.evaluate(() => {
+const playState = (page) => page.evaluate((spawnTop) => {
   const ground = document.querySelector("#cannon").getBoundingClientRect().top;
+  const visibleTop = Math.max(0, Math.round(window.visualViewport?.offsetTop ?? 0));
   return {
     ground,
+    visibleTop,
+    line: Math.max(spawnTop, visibleTop + 8),
     hearts: document.body.dataset.hearts,
     level: document.body.dataset.level,
     over: !!document.querySelector(".overlay"),
     hint: !!document.querySelector("#keyboard-hint.show"),
     ships: [...document.querySelectorAll(".ship")].map((el) => {
       const box = el.getBoundingClientRect();
-      return { text: el.dataset.text, top: box.top, bottom: box.bottom, height: box.height };
+      return { text: el.dataset.text, kind: el.dataset.kind, top: box.top, bottom: box.bottom, height: box.height };
     }),
   };
-});
+}, SPAWN_TOP);
 
-// How far down its own travel a ship is: 0 on the spawn line, 1 at the ground.
+// How far down its own visible travel a ship is: 0 at the line, 1 at the ground.
 const travelFraction = (state, ship) =>
-  (ship.top - SPAWN_TOP) / Math.max(1, state.ground - SPAWN_TOP - ship.height);
+  (ship.top - state.line) / Math.max(1, state.ground - state.line - ship.height);
 
 // The largest change of the fraction of the play height a ship keeps, matched by
 // its word so the order of the sky never matters. A ship that vanished, or a new
@@ -447,7 +450,8 @@ async function keyboardCostsNoLives() {
   await page.evaluate(() => window.advanceFrames(20000)); // the ships fly down
   const before = await playState(page);
   check(before.hearts === "3", `tablet S5: all three hearts are still there before the keyboard opens (${before.hearts})`);
-  check(before.ships.length === 2, `tablet S5: two ships are in the sky before the keyboard opens (${before.ships.length})`);
+  const threats = before.ships.filter((ship) => ship.kind === "ship");
+  check(threats.length === 3, `tablet S5: three enemy ships are in the sky before the keyboard opens (${threats.length}; ${before.ships.length} objects including bonuses)`);
   check(before.ships.every((ship) => ship.top > 300), `tablet S5: the ships are already in the lower part of the screen (${list(before.ships)})`);
 
   await openKeyboardLikeIos(page, { height: 600 });
@@ -482,6 +486,9 @@ async function keyboardCostsNoLives() {
   check(!scrolled.over, "tablet S5: a keyboard that also scrolls the page does not end the level");
   check(scrolled.ships.every((ship) => ship.bottom <= scrolled.ground), `tablet S5: every ship stays above the ground under a scrolled keyboard (${scrolled.ships.map((ship) => `${round(ship.bottom)} of ${round(scrolled.ground)}`).join(", ")})`);
   const scrolledDrift = fractionDrift(closed, scrolled);
+  const fixedLineDrift = fractionDrift({ ...closed, line: SPAWN_TOP }, { ...scrolled, line: SPAWN_TOP });
+  console.log(`tablet S5 drift reference: fixed line ${fixedLineDrift.toFixed(3)}, visible line ${closed.line} -> ${scrolled.line}: ${scrolledDrift.toFixed(3)}`);
+  check(scrolled.visibleTop === 120 && scrolled.line === 128, `tablet S5: the scrolled travel starts below the visible top (${scrolled.visibleTop} -> ${scrolled.line})`);
   check(scrolledDrift <= 0.05, `tablet S5: a scrolled keyboard keeps every ship in place too (largest change ${scrolledDrift.toFixed(3)})`);
   // S8 (T13): the scrolled page hides its top 120px, so a new ship appears
   // below that, where the child can see it.
@@ -917,18 +924,30 @@ async function phoneKeyboardCostsNoLives() {
   await tapGrade(page, 1);
   await page.evaluate(() => window.advanceFrames(600));
   await tapGame(page);
-  await page.evaluate(() => window.advanceFrames(20000));
+  // Stop while multiple ships are close to the ground, before any can land.
+  // A fixed 20 s wait lets the faster 1º ships land before the keyboard opens.
+  await page.evaluate(() => {
+    for (let frame = 0; frame < 800 && document.body.dataset.hearts === "3"; frame++) {
+      const ground = document.querySelector("#cannon").getBoundingClientRect().top;
+      const ships = [...document.querySelectorAll('.ship[data-kind="ship"]')];
+      if (ships.length >= 2 && Math.min(...ships.map((ship) => ground - ship.getBoundingClientRect().bottom)) <= 80) break;
+      window.advanceFrames(50);
+    }
+  });
   const before = await playState(page);
+  const threats = before.ships.filter((ship) => ship.kind === "ship");
+  const nearest = Math.min(...threats.map((ship) => before.ground - ship.bottom));
   check(before.hearts === "3" && before.ships.length > 0, `phone S8: ships fly with three hearts before the keyboard (${list(before.ships)}; hearts ${before.hearts})`);
+  check(threats.length >= 2 && nearest >= 0 && nearest <= 80, `phone S8: multiple ships are near the ground before the keyboard opens (${threats.length} ships, nearest ${round(nearest)}px)`);
   await openKeyboardLikeIos(page, { height: 300, steps: 6 });
   await page.evaluate(() => window.advanceFrames(100));
   const open = await playState(page);
-  check(open.hearts === "3", `phone S8: opening the phone keyboard costs no hearts (${open.hearts} of 3)`);
+  check(open.hearts === "3" && open.hearts === before.hearts, `phone S8: opening the phone keyboard costs no hearts (${before.hearts} -> ${open.hearts} of 3)`);
   check(!open.over, "phone S8: opening the phone keyboard does not end the level");
   check(open.ships.every((ship) => ship.bottom <= open.ground), `phone S8: every ship stays above the ground (${open.ships.map((ship) => `${round(ship.bottom)} of ${round(open.ground)}`).join(", ")})`);
   await page.evaluate(() => window.advanceFrames(400));
   const settled = await playState(page);
-  check(settled.hearts === "3", `phone S8: the frames right after the keyboard opens cost no hearts (${settled.hearts} of 3)`);
+  check(settled.hearts === "3" && settled.hearts === open.hearts, `phone S8: the frames right after the keyboard opens cost no hearts (${open.hearts} -> ${settled.hearts} of 3)`);
   // Past the settle pause the ships still near the ground land as they would
   // have, but a new ship gets a real sky to fly in: its words are typed away
   // and the next one must start well above the cannon.

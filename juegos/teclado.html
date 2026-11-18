@@ -145,11 +145,11 @@
       // from 3º the text must be typed exactly, capitals and accents included.
       const words = (s) => s.split(" ");
       const GRADES = {
-        1: { speed: 22, every: 4, max: 2, wave: 1, levels: [
+        1: { speed: 25, every: 3.5, max: 3, wave: 1, levels: [
           words("a e i o u"),
-          words("m p l s t"),
-          words("ma me mi mo mu pa pe pi po pu la le li lo lu sa se si so su ta te ti to tu"),
-          words("sol pato mesa pala sopa lupa mapa tela palo lima pelo oso ala pie sal mil"),
+          words("m p l s t n r d"),
+          words("ma me mi mo mu pa pe pi po pu la le li lo lu sa se si so su ta te ti to tu na ne ni no nu ra re ri ro ru da de di do du"),
+          words("sol pato mesa pala sopa lupa mapa tela palo lima pelo oso ala pie sal mil casa luna gato nube dedo mano pera rana vaca boca barco libro perro"),
         ] },
         2: { wpm: [4, 6, 8, 10], levels: [
           words("ca co cu ra re ro na ne no fa fe fo ba be bo da de di ga go ja jo va ñu"),
@@ -1151,7 +1151,8 @@
           const overlay = Juegos.overlay("🏆", summary());
           if (window.RANKING_URL) showRanking(document.querySelector(".overlay"), grade, stats.score, window.RANKING_URL);
           await overlay;
-          startLevel(true); // The fourth level repeats after the summary.
+          level = 0;
+          startLevel(true);
         } else if (window.RANKING_URL && RANKING_LEVEL_THREE_GRADES.includes(grade) && level === 2) {
           // Level 3 done: the child may enter the ranking now and then play level 4.
           playing = false;
