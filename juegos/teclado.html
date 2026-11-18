@@ -81,6 +81,11 @@
       #ranking input { width: 8em; }
       #ranking button { background: #b9eff8; font-weight: bold; }
       #ranking button:disabled { opacity: .55; }
+      #ranking .ranking-lock { box-sizing: border-box; width: 100%; min-width: 0; margin: 0; padding: 4px 8px 8px; border: 1px solid #24334b; border-radius: 9px; }
+      #ranking .ranking-lock legend { font-weight: bold; }
+      #ranking .ranking-emoji-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: 4px; }
+      #ranking .ranking-emoji { min-width: 44px; min-height: 44px; padding: 2px; font-size: 24px; cursor: pointer; }
+      #ranking .ranking-lock-clear { min-height: 44px; }
       #ranking ol, #ranking-preview ol { width: fit-content; max-width: 100%; max-height: 120px; overflow: auto; margin: 6px auto 0; padding-left: 32px; text-align: left; }
       #ranking ol:empty, #ranking-preview ol:empty { display: none; }
       #ranking li, #ranking-preview li { padding: 2px 5px; overflow-wrap: anywhere; }
@@ -954,6 +959,8 @@
         "Panda", "Halcón", "Lobo", "Pingüino", "Tortuga", "Jaguar", "Colibrí", "Ballena"];
       const RANKING_ADJECTIVES = ["Veloz", "Valiente", "Feliz", "Audaz", "Genial", "Brillante", "Gigante",
         "Ágil", "Fuerte", "Alegre", "Leal", "Tenaz", "Imparable", "Increíble", "Elegante", "Sonriente"];
+      // The indices, in this order, are the lock sent to the server.
+      const RANKING_EMOJIS = ["🍎", "⭐", "🐶", "🚀", "⚽", "🌈", "🍕", "🐱", "🎈", "🌙", "🍦", "🦋"];
 
       // Grades that may also enter the ranking after level 3 (the server keeps the same list).
       const RANKING_LEVEL_THREE_GRADES = [3];
@@ -1043,11 +1050,48 @@
         key.spellcheck = false;
         keyLabel.appendChild(key);
         form.appendChild(keyLabel);
+        const lockField = document.createElement("fieldset");
+        lockField.className = "ranking-lock";
+        const legend = document.createElement("legend");
+        legend.textContent = "Emojis secretos";
+        const hint = document.createElement("p");
+        hint.textContent = "Elige 3 emojis secretos y recuérdalos: la próxima vez que uses este nombre te los pediré.";
+        const selection = document.createElement("p");
+        selection.className = "ranking-lock-selection";
+        selection.setAttribute("aria-live", "polite");
+        selection.textContent = "Tus emojis: ninguno (0/3)";
+        const grid = document.createElement("div");
+        grid.className = "ranking-emoji-grid";
+        const chosen = [];
+        for (const [index, emoji] of RANKING_EMOJIS.entries()) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "ranking-emoji";
+          button.textContent = emoji;
+          button.addEventListener("click", () => {
+            if (submitted || chosen.length >= 3) return;
+            chosen.push(index);
+            updateLock();
+          });
+          grid.appendChild(button);
+        }
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.className = "ranking-lock-clear";
+        clear.textContent = "Borrar emojis";
+        clear.addEventListener("click", () => {
+          if (submitted) return;
+          chosen.length = 0;
+          updateLock();
+        });
+        lockField.append(legend, hint, grid, selection, clear);
+        form.appendChild(lockField);
         const actions = document.createElement("div");
         actions.className = "ranking-actions";
         const save = document.createElement("button");
         save.type = "submit";
         save.textContent = "Guardar";
+        save.disabled = true;
         const view = document.createElement("button");
         view.type = "button";
         view.textContent = "Ver ranking";
@@ -1061,8 +1105,14 @@
         layer.insertBefore(section, layer.querySelector(".play-btn"));
 
         let submitted = false, saving = false, requestVersion = 0, saved = null;
-        // The server refused the key: nothing was saved, so the child may try again.
-        class KeyRefused extends Error {
+        function updateLock() {
+          const picked = chosen.map((index) => RANKING_EMOJIS[index]).join(" ");
+          selection.textContent = `Tus emojis: ${picked || "ninguno"} (${chosen.length}/3)`;
+          save.disabled = submitted || chosen.length !== 3;
+          lockField.disabled = submitted;
+        }
+        // The server refused the key or name: nothing was saved, so the child may try again.
+        class RetryableRefusal extends Error {
           constructor(text) { super(text); this.text = text; }
         }
         async function request(params) {
@@ -1071,9 +1121,12 @@
           const response = await fetch(url.toString());
           if (!response.ok) throw new Error("Ranking request failed");
           const result = await response.json();
-          if (result && result.ok === false && result.error === "bad key") throw new KeyRefused("Esa clave no es correcta. Pregúntasela a tu profe.");
+          if (result && result.ok === false && result.error === "bad key") throw new RetryableRefusal("Esa clave no es correcta. Pregúntasela a tu profe.");
           if (result && result.ok === false && result.error === "wrong grade" && /^[1-6]$/.test(String(result.keyGrade))) {
-            throw new KeyRefused(`Con la clave de ${result.keyGrade}º no puedes entrar en el ranking de ${resultGrade}º.`);
+            throw new RetryableRefusal(`Con la clave de ${result.keyGrade}º no puedes entrar en el ranking de ${resultGrade}º.`);
+          }
+          if (result && result.ok === false && result.error === "name taken") {
+            throw new RetryableRefusal("Ese nombre ya es de un compañero con otros emojis. Elige otro nombre o revisa tus emojis.");
           }
           if (!result || result.ok !== true || !Array.isArray(result.top)) throw new Error("Ranking response failed");
           return result.top;
@@ -1098,7 +1151,7 @@
         form.addEventListener("submit", async (event) => {
           event.preventDefault();
           // Even a failed response may have followed a successful server write.
-          if (submitted) return;
+          if (submitted || chosen.length !== 3) return;
           if (!key.value.trim()) {
             message.textContent = "Escribe la clave de tu clase.";
             key.focus();
@@ -1106,19 +1159,19 @@
           }
           submitted = true;
           saving = true;
-          save.disabled = true;
+          updateLock();
           view.disabled = true;
           const version = ++requestVersion;
           const name = `${animal.value} ${adjective.value}`;
           message.textContent = "Guardando…";
           try {
-            const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim(), ...(resultLevel === 3 ? { level: 3 } : {}) });
+            const top = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim(), lock: chosen.join(","), ...(resultLevel === 3 ? { level: 3 } : {}) });
             saved = { name, points: resultScore };
             if (version === requestVersion) render(top);
           } catch (error) {
-            if (error instanceof KeyRefused) {
+            if (error instanceof RetryableRefusal) {
               submitted = false;
-              save.disabled = false;
+              updateLock();
               message.textContent = error.text;
             } else if (version === requestVersion) message.textContent = "No se pudo guardar ahora. Inténtalo más tarde.";
           } finally {

@@ -117,7 +117,14 @@ const response = (top = [], grade = 5) => ({ ok: true, grade, month: "2026-11", 
 const reply = (route, body) => route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(body) });
 const noExceptions = (game, label) => check(game.pageErrors.length === 0, `${label}: no page exceptions (${game.pageErrors.join(" | ")})`);
 // S2: every save needs the class key the teacher wrote on the board.
-const fillKey = (ranking, key = "sol") => ranking.getByLabel("Clave de clase").fill(key);
+const palette = ["🍎", "⭐", "🐶", "🚀", "⚽", "🌈", "🍕", "🐱", "🎈", "🌙", "🍦", "🦋"];
+async function fillLock(ranking, indices = [0, 1, 2]) {
+  for (const index of indices) await ranking.locator(".ranking-emoji").nth(index).click();
+}
+async function fillKey(ranking, key = "sol") {
+  await ranking.getByLabel("Clave de clase").fill(key);
+  await fillLock(ranking);
+}
 const pointsOnScreen = async (page) => Number((await page.locator("#stats").textContent()).match(/Puntos: (\d+)/)[1]);
 
 async function withoutUrl() {
@@ -195,9 +202,22 @@ async function saveAndSafety() {
     check(await keyField.evaluate((el) => document.activeElement === el), "S2 Tab reaches the key field after the adjective");
     await page.keyboard.type("sol");
     check(await keyField.inputValue() === "sol" && await page.locator(".ship").count() === 0, "S2 typing the key fills the field and shoots nothing");
+    check(await save.isDisabled(), "S5 Guardar starts disabled until three emojis are chosen");
     await page.keyboard.press("Tab");
     await page.waitForTimeout(700);
-    check(await save.evaluate((el) => document.activeElement === el), "S11 Tab reaches Guardar without the key-catcher stealing focus");
+    const emojis = ranking.locator(".ranking-emoji");
+    check(await emojis.first().evaluate((el) => document.activeElement === el), "S5 Tab reaches the emoji picker without the key-catcher stealing focus");
+    await page.keyboard.press("Enter");
+    check(await save.isDisabled() && (await ranking.locator(".ranking-lock-selection").innerText()).includes("🍎"),
+      "S5 Enter selects the first emoji and one selection cannot be sent");
+    await emojis.nth(7).click();
+    check(await save.isDisabled(), "S5 two emojis cannot be sent");
+    await emojis.nth(3).click();
+    check(await save.isEnabled() && (await ranking.locator(".ranking-lock-selection").innerText()).includes("🍎 🐱 🚀"),
+      "S5 three ordered emojis are visible and enable Guardar");
+    await ranking.getByRole("button", { name: "Borrar emojis", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    check(await save.evaluate((el) => document.activeElement === el), "S5 Tab reaches Guardar after the picker");
     const request = page.waitForRequest((r) => r.url().startsWith("https://ranking.test/") && new URL(r.url()).searchParams.get("action") === "add");
     await page.keyboard.press("Enter");
     await request;
@@ -211,9 +231,9 @@ async function saveAndSafety() {
     const adds = requests.filter((r) => r.url.searchParams.get("action") === "add");
     const params = adds[0]?.url.searchParams;
     check(adds.length === 1 && adds[0].method === "GET" && params.get("animal") === animal && params.get("adjective") === selectedAdjective
-      && params.get("grade") === "5" && params.get("points") === String(score) && params.get("key") === "sol"
-      && [...params.keys()].sort().join(",") === "action,adjective,animal,grade,key,points",
-      `S11 at most one add sends the selected invented name, fixed grade and final score (${adds.length} requests)`);
+      && params.get("grade") === "5" && params.get("points") === String(score) && params.get("key") === "sol" && params.get("lock") === "0,7,3"
+      && [...params.keys()].sort().join(",") === "action,adjective,animal,grade,key,lock,points",
+      `S11/S5 at most one add sends the selected name, score, key and ordered emoji indices (${adds.length} requests)`);
     const rows = ranking.locator("ol li");
     check(await rows.count() === 3 && await rows.nth(0).textContent() === `Lince Feliz — ${score + 100}`
       && await rows.nth(1).textContent() === `${animal} ${selectedAdjective} — ${score}`,
@@ -341,8 +361,8 @@ async function gradeOneAndRepeat() {
       }
     }
     ranking = page.locator("#ranking");
-    check(await ranking.count() === 1 && !await ranking.getByRole("button", { name: "Guardar", exact: true }).isDisabled(),
-      "S11 completing a new run creates a fresh chance to save");
+    check(await ranking.count() === 1 && await ranking.getByRole("button", { name: "Guardar", exact: true }).isDisabled(),
+      "S11/S5 a new run creates a fresh form requiring a new lock");
     const secondScore = await pointsOnScreen(page);
     await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
@@ -429,6 +449,7 @@ async function failedView() {
     check(present, "S11 viewing errors scenario has a ranking form");
     if (!present) return;
     const view = ranking.getByRole("button", { name: "Ver ranking", exact: true });
+    await fillLock(ranking);
     for (const kind of ["network", "server"]) {
       await view.click();
       await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("No se pudo cargar el ranking ahora. Inténtalo más tarde."), null, { polling: 100 });
@@ -497,6 +518,7 @@ async function keyErrors() {
     const save = ranking.getByRole("button", { name: "Guardar", exact: true });
     const key = ranking.getByLabel("Clave de clase");
     const status = ranking.locator('[role="status"]');
+    await fillLock(ranking);
     await key.fill("   ");
     await save.click();
     check(await status.textContent() === "Escribe la clave de tu clase." && adds.length === 0 && await save.isEnabled(),
@@ -519,6 +541,82 @@ async function keyErrors() {
       "S1 an entry from a younger grade shows «(de Nº)» after the name");
     check(adds.length === 3 && await save.isDisabled(), "S2 after the right key the score is saved once and Guardar stays off");
     noExceptions(game, "S2 key errors");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+// S2/S3/S5: the lock picker is ordered, retryable and usable on small screens.
+async function lockPickerAndRetry() {
+  const adds = [];
+  const game = await gameWithClock(async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("action") !== "add") return reply(route, response([], 2));
+    adds.push(Object.fromEntries(url.searchParams));
+    if (adds.length < 3) return reply(route, { ok: false, error: "name taken" });
+    return reply(route, response([{ name: "Panda Veloz", points: Number(url.searchParams.get("points")) }], 2));
+  });
+  try {
+    const { page } = game;
+    await win(page, 2);
+    const ranking = page.locator("#ranking");
+    const emojis = ranking.locator(".ranking-emoji");
+    const selection = ranking.locator(".ranking-lock-selection");
+    const clear = ranking.getByRole("button", { name: "Borrar emojis", exact: true });
+    const save = ranking.getByRole("button", { name: "Guardar", exact: true });
+    const status = ranking.locator('[role="status"]');
+    check(JSON.stringify(await emojis.allTextContents()) === JSON.stringify(palette)
+      && (await ranking.innerText()).includes("Elige 3 emojis secretos y recuérdalos: la próxima vez que uses este nombre te los pediré."),
+      "S5 the picker displays the exact twelve emojis in order and the exact hint");
+    if (await emojis.count() !== 12) return;
+    for (const size of [{ width: 320, height: 568 }, { width: 768, height: 600 }]) {
+      await page.setViewportSize(size);
+      await emojis.last().scrollIntoViewIfNeeded();
+      const boxes = await emojis.evaluateAll((buttons) => buttons.map((button) => {
+        const rect = button.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+      }));
+      check(boxes.every((box) => box.width >= 44 && box.height >= 44 && box.left >= 0 && box.right <= size.width)
+        && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        `S5 all twelve emoji tap targets fit and are at least 44px on ${size.width}px screens`);
+    }
+    await page.setViewportSize({ width: 1024, height: 600 });
+    await ranking.getByLabel("Clave de clase").fill("sol");
+    await ranking.locator("form").evaluate((form) => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    check(await save.isDisabled() && adds.length === 0, "S5 even a forced form submit cannot send zero emojis");
+    await fillLock(ranking, [3, 0]);
+    await ranking.locator("form").evaluate((form) => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    check(await save.isDisabled() && adds.length === 0 && (await selection.innerText()).includes("🚀 🍎"),
+      "S5 two chosen emojis stay ordered and a forced submit sends nothing");
+    await emojis.nth(7).click();
+    await emojis.nth(2).click();
+    check(await save.isEnabled() && (await selection.innerText()).includes("🚀 🍎 🐱") && !(await selection.innerText()).includes("🐶"),
+      "S5 a fourth tap cannot change a complete lock");
+    await clear.click();
+    check(await save.isDisabled() && !(await selection.innerText()).includes("🚀") && !(await selection.innerText()).includes("🍎"),
+      "S5 clearing removes the chosen emojis and disables Guardar");
+    await fillLock(ranking, [0, 0, 11]);
+    check(await save.isEnabled() && (await selection.innerText()).includes("🍎 🍎 🦋"), "S5 repeated emojis are allowed and shown in order");
+    await clear.click();
+    await fillLock(ranking, [3, 0, 7]);
+    await save.click();
+    const refusal = "Ese nombre ya es de un compañero con otros emojis. Elige otro nombre o revisa tus emojis.";
+    await page.waitForFunction((text) => document.querySelector('#ranking [role="status"]')?.textContent === text, refusal, { polling: 100 });
+    check(adds.length === 1 && adds[0].animal === "Tigre" && adds[0].lock === "3,0,7" && await save.isEnabled()
+      && await ranking.getByLabel("Clave de clase").inputValue() === "sol" && (await selection.innerText()).includes("🚀 🍎 🐱")
+      && await status.textContent() === refusal, "S5 name taken shows the exact message and preserves the form for retry");
+    await ranking.locator('select[name="animal"]').selectOption("Panda");
+    await save.click();
+    await page.waitForFunction(() => document.querySelector('#ranking [role="status"]')?.textContent.startsWith("Ese nombre ya es"), null, { polling: 100 });
+    check(adds.length === 2 && adds[1].animal === "Panda" && adds[1].lock === "3,0,7" && await save.isEnabled(),
+      "S5 a child can retry with another name and the same emojis");
+    await clear.click();
+    await fillLock(ranking, [3, 0, 3]);
+    await save.click();
+    await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
+    check(adds.length === 3 && adds[2].animal === "Panda" && adds[2].lock === "3,0,3" && await save.isDisabled()
+      && (await ranking.locator("ol li").textContent()).startsWith("Panda Veloz"), "S5 a child can retry with corrected emojis and save once");
+    noExceptions(game, "S5 lock picker and retry");
   } finally {
     await game.browser.close();
   }
@@ -552,7 +650,7 @@ async function levelThree() {
     await fillKey(ranking, "sol");
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 2, null, { polling: 100 });
-    check(adds.length === 1 && adds[0].level === "3" && adds[0].grade === "3" && adds[0].key === "sol",
+    check(adds.length === 1 && adds[0].level === "3" && adds[0].grade === "3" && adds[0].key === "sol" && adds[0].lock === "0,1,2",
       `S6 the level-3 save tells the server the level (${JSON.stringify(adds[0])})`);
     check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["🏆 Lobo Leal — 300", "🥇 Panda Feliz — 900"]),
       "S6 the list marks a level-4 finish with 🏆 and a level-3 one with 🥇");
@@ -621,7 +719,7 @@ async function startPreview() {
 }
 
 (async () => {
-  for (const [label, run] of [["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
+  for (const [label, run] of [["lock picker and retry", lockPickerAndRetry], ["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
     ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["start preview", startPreview]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }

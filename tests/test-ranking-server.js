@@ -3,6 +3,9 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const crypto = require("crypto");
+
+let uuidCount = 0;
 
 let okCount = 0, failCount = 0;
 function check(condition, label) {
@@ -74,6 +77,12 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
     },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (key) => (key in properties ? properties[key] : null) }) },
     Utilities: {
+      DigestAlgorithm: { SHA_256: "SHA_256" },
+      getUuid: () => `00000000-0000-4000-8000-${String(++uuidCount).padStart(12, "0")}`,
+      computeDigest: (algorithm, text) => {
+        if (algorithm !== "SHA_256") throw new Error(`unexpected digest ${algorithm}`);
+        return [...crypto.createHash("sha256").update(text, "utf8").digest()].map((byte) => byte > 127 ? byte - 256 : byte);
+      },
       // Only the pattern the script needs: the month in the school's time zone.
       formatDate: (date, zone, pattern) => {
         if (zone !== "Europe/Madrid" || pattern !== "yyyy-MM") throw new Error(`unexpected formatDate ${zone} ${pattern}`);
@@ -122,7 +131,7 @@ function saveValid() {
   const [row] = game.rows();
   check(game.rows().length === 1 && row[1] === "2026-11" && row[2] === 5 && row[3] === "Tigre Veloz" && row[4] === 1200 && row[5] === 5,
     `S11 the row keeps date, month, grade, name, points and the key's grade (${JSON.stringify(row)})`);
-  check(game.sheets.Ranking.rows[0].join("|") === "Fecha|Mes|Curso|Nombre|Puntos|Curso alumno|Nivel", "S11 a new sheet gets a header row");
+  check(game.sheets.Ranking.rows[0].join("|") === "Fecha|Mes|Curso|Nombre|Puntos|Curso alumno|Nivel|Candado", "S11 a new sheet gets a header row including Candado");
   check(Array.isArray(result.top) && result.top[0]?.name === "Tigre Veloz" && result.top[0]?.points === 1200, "S11 saving answers with the updated top 10 of the grade");
 }
 
@@ -444,8 +453,8 @@ function oldSheet() {
   sheets.Ranking.appendRow(["Fecha", "Mes", "Curso", "Nombre", "Puntos"]);
   sheets.Ranking.appendRow([new Date(), "'2026-11", 5, "Lobo Feliz", 700]);
   const result = add(legacy, {});
-  check(result.ok === true && sheets.Ranking.rows[0].join("|") === "Fecha|Mes|Curso|Nombre|Puntos|Curso alumno|Nivel",
-    `S1 an existing sheet gets the «Curso alumno» and «Nivel» titles (${sheets.Ranking.rows[0].join("|")})`);
+  check(result.ok === true && sheets.Ranking.rows[0].join("|") === "Fecha|Mes|Curso|Nombre|Puntos|Curso alumno|Nivel|Candado",
+    `S1 an existing sheet gets the «Curso alumno», «Nivel» and «Candado» titles (${sheets.Ranking.rows[0].join("|")})`);
   check(JSON.stringify(result.top) === JSON.stringify([{ name: "Tigre Veloz", points: 1200 }, { name: "Lobo Feliz", points: 700 }]),
     "S1 old rows without a real grade still show in the top");
 }
@@ -474,6 +483,213 @@ function levelThree() {
     "S6 an old row without a level counts as level 4");
 }
 
+// S2, S3, S5: a lock belongs to a name only for this grade and month.
+const hashLock = (salt, lock) => crypto.createHash("sha256").update(`${salt}:${lock}`, "utf8").digest("hex");
+const snapshot = (game) => JSON.stringify(game.sheets.Ranking?.rows || []);
+const allSheets = (game) => JSON.stringify(Object.keys(game.sheets).sort().map((name) => [name, game.sheets[name].rows]));
+const validHash = (value, lock) => {
+  const [salt, hash] = String(value || "").split(":");
+  return /^[0-9a-f-]{36}$/.test(salt || "") && hash === hashLock(salt, lock);
+};
+const expectedAdd = (grade, month, top) => ({ ok: true, grade, month, top });
+const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+const noLockLeak = (value, locks) => {
+  const text = JSON.stringify(value);
+  return locks.every((lock) => !text.includes(lock)) && !/[🍎⭐🐶🚀⚽🌈🍕🐱🎈🌙🍦🦋]/u.test(text);
+};
+
+function lockedBest() {
+  const game = load();
+  const lock = "3,0,7";
+  const first = add(game, { grade: "3", level: "3", points: "900", lock });
+  const firstTop = [{ name: "Tigre Veloz", points: 900, level: 3 }];
+  const row = game.rows()[0] || [];
+  const [salt, digest] = String(row[7] || "").split(":");
+  check(same(first, expectedAdd(3, "2026-11", firstTop)) && game.rows().length === 1
+    && row[0] instanceof Date && same(row.slice(1, 7), ["2026-11", 3, "Tigre Veloz", 900, 3, 3])
+    && /^[0-9a-f-]{36}$/.test(salt || "") && digest === hashLock(salt, lock)
+    && noLockLeak(game.sheets.Ranking.rows, [lock]) && noLockLeak(first, [lock, salt, digest]),
+    "S2/S3/S5 first locked add returns its top and stores only a salted SHA-256 in the eighth column");
+  if (!row[7]) return;
+
+  for (const points of ["800", "900"]) {
+    const before = snapshot(game);
+    const result = add(game, { grade: "3", level: "3", points, lock });
+    check(same(result, expectedAdd(3, "2026-11", firstTop)) && snapshot(game) === before && game.rows().length === 1,
+      `S5 same lock with ${points} points keeps the better/equal level-3 row unchanged`);
+  }
+  const key2 = game.keys()[2];
+  const improved = add(game, { grade: "3", key: key2, level: "3", points: "1000", lock });
+  const top3 = [{ name: "Tigre Veloz", points: 1000, level: 3, from: 2 }];
+  check(same(improved, expectedAdd(3, "2026-11", top3)) && game.rows().length === 1
+    && same(game.rows()[0].slice(1), ["2026-11", 3, "Tigre Veloz", 1000, 2, 3, `${salt}:${digest}`]),
+    "S5 same lock improves level-3 points and keeps the associated pupil grade in the same row");
+  const finished = add(game, { grade: "3", level: "4", points: "20", lock });
+  const top4 = [{ name: "Tigre Veloz", points: 20 }];
+  check(same(finished, expectedAdd(3, "2026-11", top4)) && game.rows().length === 1
+    && same(game.rows()[0].slice(1), ["2026-11", 3, "Tigre Veloz", 20, 3, 4, `${salt}:${digest}`]),
+    "S5 level 4 replaces level 3 even with fewer points, preserving the lock");
+  for (const fields of [{ level: "3", points: "99999" }, { level: "4", points: "20" }, { level: "4", points: "10" }]) {
+    const before = snapshot(game);
+    const result = add(game, { grade: "3", ...fields, lock });
+    check(same(result, expectedAdd(3, "2026-11", top4)) && snapshot(game) === before && game.rows().length === 1,
+      `S5 same lock keeps level 4 over level ${fields.level} with ${fields.points} points`);
+  }
+  const later = load("2026-11-14T11:00:00Z", game.sheets);
+  const better = add(later, { grade: "3", level: "4", points: "21", lock });
+  check(same(better, expectedAdd(3, "2026-11", [{ name: "Tigre Veloz", points: 21 }]))
+    && later.rows().length === 1 && later.rows()[0][0].toISOString() === "2026-11-14T11:00:00.000Z"
+    && same(later.rows()[0].slice(1), ["2026-11", 3, "Tigre Veloz", 21, 3, 4, `${salt}:${digest}`])
+    && noLockLeak(later.sheets.Ranking.rows, [lock]), "S5 a better level-4 score replaces the result and date in the same row");
+  const before = snapshot(later);
+  const refused = add(later, { grade: "3", lock: "7,0,3" });
+  check(same(refused, { ok: false, error: "name taken" }) && snapshot(later) === before && later.rows().length === 1,
+    "S2/S5 a different lock, including the same emojis in another order, is refused without writes");
+  const top = later.json({ action: "top", grade: "3" });
+  check(same(top, expectedAdd(3, "2026-11", [{ name: "Tigre Veloz", points: 21 }]))
+    && noLockLeak(top, [lock, salt, digest]), "S5 public top never exposes the lock, salt or digest");
+}
+
+function lockedScopesAndLegacy() {
+  const game = load();
+  game.context.SpreadsheetApp.getActiveSpreadsheet().insertSheet("Ranking");
+  game.sheets.Ranking.appendRow(["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno", "Nivel"]);
+  game.sheets.Ranking.appendRow([new Date(), "'2026-11", 5, "Tigre Veloz", 300, 5, 4]);
+  const legacy = snapshot(game);
+  const lock = "0,0,11";
+  const added = add(game, { lock, points: "400" });
+  let rows = game.rows();
+  check(same(added, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 400 }, { name: "Tigre Veloz", points: 300 }]))
+    && rows.length === 2 && same(rows[0].slice(1), ["2026-11", 5, "Tigre Veloz", 300, 5, 4])
+    && same(rows[1].slice(1, 7), ["2026-11", 5, "Tigre Veloz", 400, 5, 4])
+    && validHash(rows[1][7], lock) && snapshot(game) !== legacy && game.sheets.Ranking.rows[0][7] === "Candado"
+    && noLockLeak(game.sheets.Ranking.rows, [lock]), "S3/S5 an old unlocked row stays unowned; a locked add appends and upgrades its header");
+  if (!rows[1] || !rows[1][7]) return;
+  const originalHash = rows[1][7];
+  const stale = add(game, { points: "500" });
+  rows = game.rows();
+  check(same(stale, expectedAdd(5, "2026-11", [
+    { name: "Tigre Veloz", points: 500 }, { name: "Tigre Veloz", points: 400 }, { name: "Tigre Veloz", points: 300 },
+  ])) && rows.length === 3 && same(rows[2].slice(1, 7), ["2026-11", 5, "Tigre Veloz", 500, 5, 4]) && !rows[2][7],
+    "S5 a stale page with no lock still appends an unlocked row even after the name is claimed");
+  const update = add(game, { points: "600", lock });
+  rows = game.rows();
+  check(same(update, expectedAdd(5, "2026-11", [
+    { name: "Tigre Veloz", points: 600 }, { name: "Tigre Veloz", points: 500 }, { name: "Tigre Veloz", points: 300 },
+  ])) && rows.length === 3 && rows[0][4] === 300 && rows[1][4] === 600 && rows[1][7] === originalHash && rows[2][4] === 500,
+    "S5 a returning owner updates only its locked row when old and stale duplicates exist");
+  const before = allSheets(game);
+  const refused = add(game, { lock: "0,11,0" });
+  check(same(refused, { ok: false, error: "name taken" }) && allSheets(game) === before && game.rows().length === 3,
+    "S5 unlocked duplicates cannot bypass an existing lock or change any sheet");
+
+  const otherGrade = add(game, { grade: "6", points: "700", lock });
+  rows = game.rows();
+  check(same(otherGrade, expectedAdd(6, "2026-11", [{ name: "Tigre Veloz", points: 700 }])) && rows.length === 4
+    && same(rows[3].slice(1, 7), ["2026-11", 6, "Tigre Veloz", 700, 6, 4])
+    && validHash(rows[3][7], lock) && rows[3][7] !== originalHash,
+    "S3/S5 the same name and lock in another grade gets its own independently salted row");
+  const nextMonth = load("2026-12-01T10:00:00Z", game.sheets);
+  const december = add(nextMonth, { points: "800", lock });
+  rows = nextMonth.rows();
+  check(same(december, expectedAdd(5, "2026-12", [{ name: "Tigre Veloz", points: 800 }])) && rows.length === 5
+    && same(rows[4].slice(1, 7), ["2026-12", 5, "Tigre Veloz", 800, 5, 4])
+    && validHash(rows[4][7], lock) && new Set([originalHash, rows[3][7], rows[4][7]]).size === 3
+    && noLockLeak(nextMonth.sheets.Ranking.rows, [lock]),
+    "S3/S5 the next month starts a fresh reservation with a different per-row salt");
+  const top = nextMonth.json({ action: "top", grade: "5" });
+  check(same(top, expectedAdd(5, "2026-12", [{ name: "Tigre Veloz", points: 800 }])) && noLockLeak(top, [lock, rows[4][7]]),
+    "S5 current-month top ignores old duplicates and never exposes lock data");
+}
+
+function differentNames() {
+  const game = load();
+  const lock = "1,2,3", otherLock = "3,2,1";
+  const first = add(game, { points: "500", lock });
+  const second = add(game, { animal: "Panda", points: "200", lock });
+  const third = add(game, { adjective: "Feliz", points: "100", lock: otherLock });
+  const top = [{ name: "Tigre Veloz", points: 500 }, { name: "Panda Veloz", points: 200 }, { name: "Tigre Feliz", points: 100 }];
+  const rows = game.rows();
+  check(same(first, expectedAdd(5, "2026-11", top.slice(0, 1))) && same(second, expectedAdd(5, "2026-11", top.slice(0, 2)))
+    && same(third, expectedAdd(5, "2026-11", top)) && rows.length === 3
+    && same(rows.map((row) => row.slice(1, 7)), [
+      ["2026-11", 5, "Tigre Veloz", 500, 5, 4], ["2026-11", 5, "Panda Veloz", 200, 5, 4], ["2026-11", 5, "Tigre Feliz", 100, 5, 4],
+    ]) && validHash(rows[0][7], lock) && validHash(rows[1][7], lock) && validHash(rows[2][7], otherLock)
+    && new Set(rows.map((row) => row[7])).size === 3 && noLockLeak(game.sheets.Ranking.rows, [lock, otherLock]),
+    "S5 a different animal or adjective is a separate name with its own salted row");
+  const before = allSheets(game);
+  const refused = add(game, { animal: "Panda", lock: otherLock });
+  check(same(refused, { ok: false, error: "name taken" }) && allSheets(game) === before && game.rows().length === 3,
+    "S5 another name's lock cannot unlock this name and changes no sheet");
+  const improved = add(game, { animal: "Panda", points: "600", lock });
+  check(same(improved, expectedAdd(5, "2026-11", [
+    { name: "Panda Veloz", points: 600 }, { name: "Tigre Veloz", points: 500 }, { name: "Tigre Feliz", points: 100 },
+  ]))
+    && game.rows().length === 3 && same(game.rows().map((row) => row[4]), [500, 600, 100])
+    && game.rows()[1][7] === rows[1][7] && noLockLeak(improved, [lock, otherLock]),
+    "S5 a matching lock updates only its own name and public results omit the lock");
+}
+
+function dateCellsAndForgottenLock() {
+  const game = load();
+  const lock = "11,4,0";
+  const first = add(game, { lock, points: "300" });
+  const firstRow = game.rows()[0] || [];
+  check(same(first, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 300 }]))
+    && game.rows().length === 1 && same(firstRow.slice(1, 7), ["2026-11", 5, "Tigre Veloz", 300, 5, 4])
+    && validHash(firstRow[7], lock) && noLockLeak(game.sheets.Ranking.rows, [lock]),
+    "S3/S5 a new reservation stores the expected row and a real salted hash");
+  if (!firstRow[7]) return;
+  const previousHash = firstRow[7];
+  game.sheets.Ranking.rows[1][1] = new game.context.Date("2026-11-01T00:00:00Z");
+  const before = allSheets(game);
+  const refused = add(game, { lock: "0,4,11" });
+  check(same(refused, { ok: false, error: "name taken" }) && allSheets(game) === before && game.rows().length === 1,
+    "S5 a locked row with an old date-form month still protects its name without writes");
+  const updated = add(game, { lock, points: "400" });
+  check(same(updated, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 400 }])) && game.rows().length === 1
+    && same(game.rows()[0].slice(1), ["2026-11", 5, "Tigre Veloz", 400, 5, 4, previousHash]),
+    "S5 a correct lock updates a row whose month had been converted to a date");
+  game.sheets.Ranking.deleteRows(2, 1); // the teacher deletes the row after a forgotten lock
+  const replacement = add(game, { lock: "0,4,11", points: "200" });
+  const row = game.rows()[0] || [];
+  check(same(replacement, expectedAdd(5, "2026-11", [{ name: "Tigre Veloz", points: 200 }])) && game.rows().length === 1
+    && same(row.slice(1, 7), ["2026-11", 5, "Tigre Veloz", 200, 5, 4]) && validHash(row[7], "0,4,11")
+    && row[7] !== previousHash && noLockLeak(game.sheets.Ranking.rows, [lock, "0,4,11"]),
+    "S3 deleting a forgotten lock's row frees the name for a new lock with a fresh salt");
+}
+
+function lockRejections() {
+  const empty = load();
+  const noSheet = allSheets(empty);
+  const invalid = empty.json({ action: "add", animal: "Tigre", adjective: "Veloz", grade: "5", points: "1", key: "sol", lock: "1,2" });
+  check(same(invalid, { ok: false, error: "bad lock" }) && allSheets(empty) === noSheet,
+    "S5 a malformed lock cannot even create a sheet on a fresh spreadsheet");
+  const game = load();
+  const keys = game.keys();
+  add(game, { key: keys[5], lock: "1,2,3" });
+  const before = allSheets(game);
+  for (const lock of ["", "1,2", "1,2,3,4", "12,0,1", "-1,0,1", "1.5,2,3", "1,,3", "1,2,x", "🍎,⭐,🐶", "01,2,3", "1,02,3", "00,1,2", " 1,2,3", "1,2,3\n", null, 123]) {
+    const result = add(game, { key: keys[5], lock });
+    check(same(result, { ok: false, error: "bad lock" }) && allSheets(game) === before && game.rows().length === 1,
+      `S5 malformed lock ${JSON.stringify(lock)} is rejected without changing any sheet`);
+  }
+  const wrongKey = add(game, { key: "patata", lock: "1,2,3", points: "9999" });
+  check(same(wrongKey, { ok: false, error: "bad key" }) && allSheets(game) === before && game.rows().length === 1,
+    "S5 even the right lock cannot update a row without the class key");
+  const wrongGrade = add(game, { grade: "5", key: keys[6], lock: "1,2,3", points: "9999" });
+  check(same(wrongGrade, { ok: false, error: "wrong grade", keyGrade: 6 }) && allSheets(game) === before,
+    "S5 even the right lock cannot bypass the class-key grade check");
+  const brake = load();
+  const key = brake.keys()[5];
+  add(brake, { key, lock: "1,2,3" });
+  const locked = snapshot(brake);
+  let taken = 0;
+  for (let i = 0; i < 29; i++) if (same(add(brake, { key, lock: "3,2,1" }), { ok: false, error: "name taken" })) taken++;
+  check(taken === 29 && same(add(brake, { key, lock: "1,2,3" }), { ok: false, error: "too many" })
+    && snapshot(brake) === locked && brake.rows().length === 1, "S5 wrong locks count toward the existing rate limit, without writes");
+}
+
 lists();
 saveValid();
 rejectInvalid();
@@ -492,5 +708,10 @@ keyRules();
 handEdits();
 oldSheet();
 levelThree();
+lockedBest();
+lockedScopesAndLegacy();
+differentNames();
+dateCellsAndForgottenLock();
+lockRejections();
 console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 process.exit(failCount ? 1 : 0);

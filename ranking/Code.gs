@@ -14,7 +14,8 @@
 //
 // Public requests (GET, so a <script> tag can call it too):
 //   ?action=top&grade=5                         -> top 10 of the current month
-//   ?action=add&animal=Tigre&adjective=Veloz&grade=5&points=1200&key=sol
+//   ?action=add&animal=Tigre&adjective=Veloz&grade=5&points=1200&key=sol&lock=3,0,7
+//     lock is three ordered palette indices; an absent lock is an old page.
 //   &callback=name (optional)                   -> answer wrapped as name({...});
 //
 // Protected requests for the Telegram bot (form POST only, never GET):
@@ -95,7 +96,7 @@ var KEY_SHAPE = /^[a-z]{3,20}( [0-9]{1,2})?$/;
 var BLOCKED_KEYS = ["caca", "culo", "pedo", "pene", "pito", "popo", "puta", "puto", "teta", "nazi", "cono", "mear", "mierda"];
 
 var SHEET = "Ranking";
-var HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno", "Nivel"];
+var HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno", "Nivel", "Candado"];
 // Grades that may also enter the ranking after level 3 (a level-4 finish always ranks above).
 var LEVEL_THREE_GRADES = [3];
 var KEYS_SHEET = "Claves";
@@ -375,6 +376,12 @@ function top(params) {
   return { ok: true, grade: grade, month: found.month, top: found.top };
 }
 
+// The salt is unique to a row; neither the emoji indices nor the emojis are stored.
+function lockHash(salt, lock) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + ":" + lock);
+  return bytes.map(function (byte) { return ("0" + (byte & 255).toString(16)).slice(-2); }).join("");
+}
+
 function add(params) {
   var grade = readGrade(params.grade);
   if (grade === null) return { ok: false, error: "bad grade" };
@@ -383,6 +390,12 @@ function add(params) {
   var level = params.level === undefined ? 4 : Number(params.level);
   if (level !== 4 && !(level === 3 && LEVEL_THREE_GRADES.indexOf(grade) >= 0)) return { ok: false, error: "bad level" };
   if (!/^\d{1,6}$/.test(String(params.points)) || Number(params.points) > MAX_POINTS) return { ok: false, error: "bad points" };
+  var emojiLock = null;
+  if (params.lock !== undefined) {
+    // Exactly three palette indices 0-11 with no leading zeros, so one lock has one spelling.
+    if (typeof params.lock !== "string" || !/^(?:\d|1[01]),(?:\d|1[01]),(?:\d|1[01])$/.test(params.lock)) return { ok: false, error: "bad lock" };
+    emojiLock = params.lock;
+  }
   var refused = withLock(function () {
     // A simple brake against someone flooding the sheet or guessing keys.
     var cache = CacheService.getScriptCache();
@@ -394,8 +407,35 @@ function add(params) {
     if (real === null) return { ok: false, error: "bad key" };
     // A key enters its own grade or an older one, never a younger one.
     if (real > grade) return { ok: false, error: "wrong grade", keyGrade: real };
+    var tab = sheet(), month = currentMonth(), name = params.animal + " " + params.adjective;
+    var stored = "", rowIndex = -1, oldRow;
+    if (emojiLock !== null) {
+      var rows = tab.getDataRange().getValues().slice(1);
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        // Legacy rows have no owner and must not hide a later locked row.
+        if (monthOf(row[1]) !== month || Number(row[2]) !== grade || row[3] !== name || !row[7]) continue;
+        stored = String(row[7]);
+        var pieces = stored.split(":");
+        if (pieces.length !== 2 || lockHash(pieces[0], emojiLock) !== pieces[1]) return { ok: false, error: "name taken" };
+        rowIndex = i + 2;
+        oldRow = row;
+        break;
+      }
+      if (rowIndex < 0) {
+        var salt = Utilities.getUuid();
+        stored = salt + ":" + lockHash(salt, emojiLock);
+      }
+    }
     // The apostrophe keeps the month as text, so Sheets never turns it into a date.
-    sheet().appendRow([new Date(), "'" + currentMonth(), grade, params.animal + " " + params.adjective, Number(params.points), real, level]);
+    var values = [new Date(), "'" + month, grade, name, Number(params.points), real, level, stored];
+    if (rowIndex < 0) tab.appendRow(values);
+    else {
+      var oldLevel = oldRow[6] === "" || oldRow[6] === undefined ? 4 : Number(oldRow[6]);
+      if (level > oldLevel || (level === oldLevel && Number(params.points) > Number(oldRow[4]))) {
+        tab.getRange(rowIndex, 1, 1, HEADER.length).setValues([values]);
+      }
+    }
     return null;
   });
   if (refused) return refused;
