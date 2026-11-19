@@ -6,21 +6,25 @@
 // points and the date: never a real name, an email or anything that identifies
 // a child. The teacher can delete any row by hand at any time.
 //
-// Class keys: each grade has a secret word (tab «Claves») that the teacher
-// writes on the board. A score is saved only with a key, and the key tells
-// the child's real grade: a key may enter its own grade or an older one, so a
-// 6º child cannot fill 1º's ranking. On the first request of each month the
-// six keys change by themselves. The teacher may also edit the tab by hand.
+// Class keys (tab «Claves»): 1º-2º use a picture, and 3º-6º a secret word;
+// the teacher puts the key on the board. Pictures are stored as "🦁 león"
+// and may be sent as the emoji, its word or both. A key tells the child's
+// real grade: it may enter its own grade or an older one, never a younger one.
+// The six keys change on the first request of each month; the teacher may also
+// edit the tab by hand.
 //
 // Public requests (GET, so a <script> tag can call it too):
 //   ?action=top&grade=5                         -> top 10 of the current month
+//   ?action=add&animal=Tigre&adjective=Veloz&grade=1&points=1200&key=león&lock=3,0
 //   ?action=add&animal=Tigre&adjective=Veloz&grade=5&points=1200&key=sol&lock=3,0,7
-//     lock is three ordered palette indices; an absent lock is an old page.
+//     lock is two ordered palette indices for form grades 1º-2º, three for
+//     3º-6º; an absent lock is an old page in 3º-6º and is refused in 1º-2º.
 //   &callback=name (optional)                   -> answer wrapped as name({...});
 //
 // Protected requests for the Telegram bot (form POST only, never GET):
-//   action=keys&secret=...                      -> { month, keys: { "1": "sol", ... } }
-//   action=setkey&grade=6&key=cometa&secret=... -> changes one grade's key
+//   action=keys&secret=...                      -> { month, keys: { "1": "🦁 león", ... } }
+//   action=setkey&grade=1&key=león&secret=...  -> changes a picture key
+//   action=setkey&grade=6&key=cometa&secret=... -> changes a word key
 // The secret is the Script Property BOT_SECRET (Project Settings > Script
 // Properties) or, without it, PRIVATE_BOT_SECRET from the private file that
 // ranking/deploy.sh adds. Never write it in this file: this file is public.
@@ -90,7 +94,10 @@ var KEY_WORDS = [
   "vidrio", "viento", "vinagre", "violín", "volante", "volcán", "voleibol", "yegua",
   "yogur", "zanahoria", "zapato", "zorro", "zueco",
 ];
-// A key is a word of 3 to 20 letters, optionally followed by one or two digits.
+// The six drawings on the board; the first two grades always use different ones.
+var PICTURE_KEYS = ["🦁 león", "🐸 rana", "🌻 girasol", "🚂 tren", "🐢 tortuga", "🍓 fresa"];
+var PICTURE_GRADES = [1, 2];
+// A word key is a word of 3 to 20 letters, optionally followed by one or two digits.
 var KEY_SHAPE = /^[a-z]{3,20}( [0-9]{1,2})?$/;
 // Words a class should never see on the board, by hand or generated.
 var BLOCKED_KEYS = ["caca", "culo", "pedo", "pene", "pito", "popo", "puta", "puto", "teta", "nazi", "cono", "mear", "mierda"];
@@ -195,6 +202,23 @@ function normalizeKey(value) {
     .replace(/([a-z])(\d)/g, "$1 $2");
 }
 
+// Match an emoji, its word, or both; always return the canonical board label.
+function pictureKey(value) {
+  var key = normalizeKey(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s/g, "");
+  if (!key) return null;
+  for (var i = 0; i < PICTURE_KEYS.length; i++) {
+    var parts = PICTURE_KEYS[i].split(" ");
+    var word = normalizeKey(parts[1]);
+    if (key === parts[0] || key === word || key === parts[0] + word) return PICTURE_KEYS[i];
+  }
+  return null;
+}
+
+// A picture's word must not also identify a different grade's word key.
+function keyIdentity(value) {
+  return pictureKey(value) || normalizeKey(value);
+}
+
 // A key only counts when it looks like a key and is not a blocked word.
 function keyShapeOk(key) {
   if (!KEY_SHAPE.test(key)) return false;
@@ -227,46 +251,83 @@ function newKey(avoid, avoidWords) {
   throw new Error("no free key");
 }
 
+// Pick from the available pictures, preferably not ones already in the tab.
+// If every picture is mentioned, first avoid the picture grades' previous keys;
+// only occupied current keys are mandatory when old or extra rows fill the tab.
+function newPictureKey(occupied, avoid, previous) {
+  previous = previous || [];
+  var free = PICTURE_KEYS.filter(function (picture) { return occupied.indexOf(picture) < 0; });
+  var fresh = free.filter(function (picture) { return avoid.indexOf(picture) < 0; });
+  var changed = free.filter(function (picture) { return previous.indexOf(picture) < 0; });
+  var choices = fresh.length ? fresh : changed.length ? changed : free;
+  if (!choices.length) throw new Error("no free picture");
+  return choices[Math.floor(Math.random() * choices.length)];
+}
+
 // The six keys of the current month. The tab may have been edited by hand:
 // a grade keeps its key only when it has one valid row of this month and no
-// other row of the tab has the same key. Any other grade gets a new key, so on the first
-// use of a new month all six change. Call only while holding the script lock.
-function currentKeys() {
+// other row of the tab has the same key (including picture aliases). Any other
+// grade gets a new key. An optional picture override reserves a bot's requested
+// key before minting the other grade. Call only while holding the script lock.
+function currentKeys(overrideGrade, overrideKey) {
   var month = currentMonth();
   var tab = sheetNamed(KEYS_SHEET, KEYS_HEADER);
   var rows = tab.getDataRange().getValues().slice(1);
-  var found = {}, seen = {}, avoid = [], avoidWords = [], uses = {};
+  var found = {}, seen = {}, avoid = [], avoidWords = [], uses = {}, avoidPictures = [], previousPictures = [];
   for (var i = 0; i < rows.length; i++) {
     var grade = readGrade(rows[i][0]);
     var key = normalizeKey(rows[i][1]);
+    var picture = pictureKey(rows[i][1]);
     // Count every row, so a repeated grade cannot hide a key shared with another.
     if (key) {
       avoid.push(key);
-      uses[key] = (uses[key] || 0) + 1;
+      var identity = keyIdentity(rows[i][1]);
+      uses[identity] = (uses[identity] || 0) + 1;
       var word = key.split(" ")[0];
       if (avoidWords.indexOf(word) < 0) avoidWords.push(word);
+      if (picture && avoidPictures.indexOf(picture) < 0) avoidPictures.push(picture);
+      if (picture && PICTURE_GRADES.indexOf(grade) >= 0 && previousPictures.indexOf(picture) < 0) previousPictures.push(picture);
     }
     if (grade === null) continue;
     seen[grade] = (seen[grade] || 0) + 1;
-    // A key is kept exactly as the teacher wrote it ("Tiburón 47").
-    if (monthOf(rows[i][2]) === month && keyShapeOk(key)) found[grade] = String(rows[i][1]).trim();
+    if (monthOf(rows[i][2]) !== month) continue;
+    if (PICTURE_GRADES.indexOf(grade) >= 0) {
+      if (picture) found[grade] = picture;
+    } else if (keyShapeOk(key)) {
+      // Word keys are kept exactly as the teacher wrote them ("Tiburón 47").
+      found[grade] = String(rows[i][1]).trim();
+    }
   }
   var keys = {};
   var tidy = rows.length === GRADES.length;
   for (var n = 0; n < GRADES.length; n++) {
     var each = GRADES[n], kept = found[each];
-    if (seen[each] === 1 && kept && uses[normalizeKey(kept)] === 1) keys[each] = kept;
+    if (seen[each] === 1 && kept && uses[keyIdentity(kept)] === 1) keys[each] = kept;
     var row = rows[n] || [];
     if (!keys[each] || Number(row[0]) !== each || row[1] !== kept) tidy = false;
   }
+  if (overrideGrade) {
+    keys[overrideGrade] = overrideKey;
+    tidy = false;
+  }
   if (tidy) return keys;
+  var occupiedPictures = [];
+  for (var g in keys) {
+    var occupied = pictureKey(keys[g]);
+    if (occupied) occupiedPictures.push(occupied);
+  }
   var values = [];
   for (var m = 0; m < GRADES.length; m++) {
     var level = GRADES[m];
     if (!keys[level]) {
-      keys[level] = newKey(avoid, avoidWords);
-      avoid.push(normalizeKey(keys[level]));
-      avoidWords.push(normalizeKey(keys[level]).split(" ")[0]);
+      if (PICTURE_GRADES.indexOf(level) >= 0) {
+        keys[level] = newPictureKey(occupiedPictures, avoidPictures, previousPictures);
+        occupiedPictures.push(keys[level]);
+      } else {
+        keys[level] = newKey(avoid, avoidWords);
+        avoid.push(normalizeKey(keys[level]));
+        avoidWords.push(normalizeKey(keys[level]).split(" ")[0]);
+      }
     }
     // The apostrophe keeps the month as text, so Sheets never turns it into a date.
     values.push([level, keys[level], "'" + month]);
@@ -298,13 +359,28 @@ function readKeys() {
 function setKey(params) {
   var grade = readGrade(params.grade);
   if (grade === null) return { ok: false, error: "bad grade" };
-  var key = normalizeKey(params.key);
-  if (!keyShapeOk(key)) return { ok: false, error: "bad key" };
+  var isPicture = PICTURE_GRADES.indexOf(grade) >= 0;
+  var key = isPicture ? pictureKey(params.key) : normalizeKey(params.key);
+  if (isPicture ? !key : !keyShapeOk(key)) return { ok: false, error: "bad key" };
   return withLock(function () {
-    var keys = currentKeys();
-    for (var g in keys) if (Number(g) !== grade && normalizeKey(keys[g]) === key) return { ok: false, error: "key in use" };
-    keys[grade] = key;
-    sheetNamed(KEYS_SHEET, KEYS_HEADER).getRange(grade + 1, 1, 1, 3).setValues([[grade, key, "'" + currentMonth()]]);
+    var keys;
+    if (isPicture) {
+      // Check current rows without tidying: a refused change must not write the sheet.
+      var tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KEYS_SHEET);
+      var rows = tab ? tab.getDataRange().getValues().slice(1) : [];
+      for (var i = 0; i < rows.length; i++) {
+        var other = readGrade(rows[i][0]);
+        if (other === null || other === grade || monthOf(rows[i][2]) !== currentMonth()) continue;
+        var valid = PICTURE_GRADES.indexOf(other) >= 0 ? pictureKey(rows[i][1]) : keyShapeOk(normalizeKey(rows[i][1]));
+        if (valid && keyIdentity(rows[i][1]) === key) return { ok: false, error: "key in use" };
+      }
+      keys = currentKeys(grade, key);
+    } else {
+      keys = currentKeys();
+      for (var g in keys) if (Number(g) !== grade && keyIdentity(keys[g]) === keyIdentity(key)) return { ok: false, error: "key in use" };
+      keys[grade] = key;
+      sheetNamed(KEYS_SHEET, KEYS_HEADER).getRange(grade + 1, 1, 1, 3).setValues([[grade, key, "'" + currentMonth()]]);
+    }
     return { ok: true, month: currentMonth(), keys: keys };
   });
 }
@@ -314,17 +390,39 @@ function setKey(params) {
 function rotateKeys() {
   return withLock(function () {
     var month = currentMonth();
+    // If this is the first request of a month, currentKeys() rotates once before
+    // this explicit rotation. Do not accidentally bring back last month's pictures.
+    var priorTab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KEYS_SHEET);
+    var priorRows = priorTab ? priorTab.getDataRange().getValues().slice(1) : [];
+    var previousPictures = [], previousGrades = [];
+    for (var i = 0; i < priorRows.length; i++) {
+      var priorGrade = readGrade(priorRows[i][0]), priorPicture = pictureKey(priorRows[i][1]);
+      if (PICTURE_GRADES.indexOf(priorGrade) >= 0 && priorPicture && previousGrades.indexOf(priorGrade) < 0) {
+        previousGrades.push(priorGrade);
+        if (previousPictures.indexOf(priorPicture) < 0) previousPictures.push(priorPicture);
+      }
+    }
     var old = currentKeys();
-    var avoid = [], avoidWords = [], keys = {}, values = [];
+    var avoid = [], avoidWords = [], keys = {}, values = [], avoidPictures = [], occupiedPictures = previousPictures.slice();
     for (var g in old) {
       avoid.push(normalizeKey(old[g]));
       avoidWords.push(normalizeKey(old[g]).split(" ")[0]);
+      var picture = pictureKey(old[g]);
+      if (picture) {
+        avoidPictures.push(picture);
+        if (PICTURE_GRADES.indexOf(Number(g)) >= 0 && occupiedPictures.indexOf(picture) < 0) occupiedPictures.push(picture);
+      }
     }
     for (var n = 0; n < GRADES.length; n++) {
       var level = GRADES[n];
-      keys[level] = newKey(avoid, avoidWords);
-      avoid.push(normalizeKey(keys[level]));
-      avoidWords.push(normalizeKey(keys[level]).split(" ")[0]);
+      if (PICTURE_GRADES.indexOf(level) >= 0) {
+        keys[level] = newPictureKey(occupiedPictures, avoidPictures);
+        occupiedPictures.push(keys[level]);
+      } else {
+        keys[level] = newKey(avoid, avoidWords);
+        avoid.push(normalizeKey(keys[level]));
+        avoidWords.push(normalizeKey(keys[level]).split(" ")[0]);
+      }
       values.push([level, keys[level], "'" + month]);
     }
     var tab = sheetNamed(KEYS_SHEET, KEYS_HEADER);
@@ -337,9 +435,13 @@ function rotateKeys() {
 
 // The grade whose key this is, or null.
 function gradeOfKey(keys, value) {
-  var key = normalizeKey(value);
+  var key = normalizeKey(value), picture = pictureKey(value);
   if (!key) return null;
-  for (var g in keys) if (normalizeKey(keys[g]) === key) return Number(g);
+  for (var g in keys) {
+    if (PICTURE_GRADES.indexOf(Number(g)) >= 0) {
+      if (picture && picture === keys[g]) return Number(g);
+    } else if (normalizeKey(keys[g]) === key) return Number(g);
+  }
   return null;
 }
 
@@ -398,9 +500,13 @@ function add(params) {
   if (level !== 4 && !(level === 3 && LEVEL_THREE_GRADES.indexOf(grade) >= 0)) return { ok: false, error: "bad level" };
   if (!/^\d{1,6}$/.test(String(params.points)) || Number(params.points) > MAX_POINTS) return { ok: false, error: "bad points" };
   var emojiLock = null;
+  // 1º and 2º began with picture keys and a two-emoji lock: no old page can save there, so the lock is required.
+  if (params.lock === undefined && PICTURE_GRADES.indexOf(grade) >= 0) return { ok: false, error: "bad lock" };
   if (params.lock !== undefined) {
-    // Exactly three palette indices 0-11 with no leading zeros, so one lock has one spelling.
-    if (typeof params.lock !== "string" || !/^(?:\d|1[01]),(?:\d|1[01]),(?:\d|1[01])$/.test(params.lock)) return { ok: false, error: "bad lock" };
+    // The form grade chooses two or three palette indices 0-11, without leading zeros.
+    var lockShape = PICTURE_GRADES.indexOf(grade) >= 0
+      ? /^(?:\d|1[01]),(?:\d|1[01])$/ : /^(?:\d|1[01]),(?:\d|1[01]),(?:\d|1[01])$/;
+    if (typeof params.lock !== "string" || !lockShape.test(params.lock)) return { ok: false, error: "bad lock" };
     emojiLock = params.lock;
   }
   return withLock(function () {

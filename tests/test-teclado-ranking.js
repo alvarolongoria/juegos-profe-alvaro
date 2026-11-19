@@ -113,10 +113,15 @@ async function skipLevelThreeRanking(page) {
   if (await warning.count()) await warning.getByRole("button", { name: "Jugar sin guardar" }).click();
 }
 
-async function win(page, grade, checkEarly = false) {
+async function win(page, grade, checkEarly = false, touch = false) {
   await chooseGrade(page, grade);
   if (checkEarly) check(await page.locator("#ranking").count() === 0, "S11 no ranking at the start of the game");
   for (let level = 0; level < 4; level++) {
+    // A tablet does not automatically reopen its keyboard, including after the level-3 overlay.
+    if (touch) {
+      await page.waitForFunction(() => !document.querySelector(".overlay"), null, { polling: 50 });
+      await page.locator(".key-catcher").focus();
+    }
     const result = await finishWithClock(page);
     if (checkEarly && level < 2) {
       check(result.level === String(level) && result.finished && await page.locator("#ranking").count() === 0 && await page.locator(".overlay").count() === 0,
@@ -137,13 +142,18 @@ async function win(page, grade, checkEarly = false) {
 const response = (top = [], grade = 5) => ({ ok: true, grade, month: "2026-11", top });
 const reply = (route, body) => route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(body) });
 const noExceptions = (game, label) => check(game.pageErrors.length === 0, `${label}: no page exceptions (${game.pageErrors.join(" | ")})`);
-// S2: every save needs the class key the teacher wrote on the board.
+// Every save needs the board key and a lock appropriate to the grade played.
 const palette = ["🍎", "⭐", "🐶", "🚀", "⚽", "🌈", "🍕", "🐱", "🎈", "🌙", "🍦", "🦋"];
-async function fillLock(ranking, indices = [0, 1, 2]) {
+const pictureKeys = ["🦁 león", "🐸 rana", "🌻 girasol", "🚂 tren", "🐢 tortuga", "🍓 fresa"];
+const pictureGroup = (ranking) => ranking.getByRole("group", { name: "Dibujo de la pizarra", exact: true });
+async function fillLock(ranking, indices) {
+  if (!indices) indices = await pictureGroup(ranking).count() ? [0, 1] : [0, 1, 2];
   for (const index of indices) await ranking.locator(".ranking-emoji").nth(index).click();
 }
-async function fillKey(ranking, key = "sol") {
-  await ranking.getByLabel("Clave de clase").fill(key);
+async function fillKey(ranking, key) {
+  const pictures = pictureGroup(ranking);
+  if (await pictures.count()) await pictures.getByRole("button", { name: key ?? "león", exact: true }).click();
+  else await ranking.getByLabel("Clave de clase").fill(key ?? "sol");
   await fillLock(ranking);
 }
 const pointsOnScreen = async (page) => Number((await page.locator("#stats").textContent()).match(/Puntos: (\d+)/)[1]);
@@ -444,6 +454,192 @@ async function gradeOneAndRepeat() {
   }
 }
 
+// ranking-justo S3/L6-L8: picture keys and two-emoji locks follow the grade played.
+async function pictureKeyAndLock(grade) {
+  const adds = [];
+  const game = await gameWithClock(async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("action") !== "add") return reply(route, response([], grade));
+    adds.push({ method: route.request().method(), params: Object.fromEntries(url.searchParams) });
+    if (url.searchParams.get("key") === "rana") return reply(route, { ok: false, error: "wrong grade", keyGrade: grade + 1 });
+    if (url.searchParams.get("key") !== "tortuga") return reply(route, { ok: false, error: "bad key" });
+    // In 2º, pretend the accepted picture belongs to 1º: the form still needs two emojis.
+    return reply(route, response([{ name: "Tigre Veloz", points: Number(url.searchParams.get("points")), ...(grade === 2 ? { from: 1 } : {}) }], grade));
+  }, { touch: grade === 2 });
+  try {
+    const { page } = game;
+    await win(page, grade, false, grade === 2);
+    const ranking = page.locator("#ranking");
+    const pictures = pictureGroup(ranking);
+    check(await pictures.count() === 1 && await ranking.getByLabel("Clave de clase").count() === 0
+      && await ranking.locator("input, textarea, [contenteditable=true]").count() === 0,
+      `S3 ${grade}º replaces the written key with an accessible, labelled picture group`);
+    if (await pictures.count() !== 1) return;
+    const buttons = pictures.getByRole("button");
+    const labels = pictureKeys.map((picture) => picture.split(" ")[1]);
+    check(JSON.stringify(await buttons.allTextContents()) === JSON.stringify(pictureKeys)
+      && JSON.stringify(serverList("PICTURE_KEYS")) === JSON.stringify(pictureKeys)
+      && JSON.stringify(await buttons.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")))) === JSON.stringify(labels)
+      && await pictures.getByRole("button", { pressed: true }).count() === 0
+      && await pictures.getByRole("button", { pressed: false }).count() === 6,
+      `S3/L8 ${grade}º displays the server's six pictures in order with accessible names and no initial choice`);
+    if (await buttons.count() !== 6) return;
+    for (const size of [{ width: 320, height: 568 }, { width: 768, height: 600 }]) {
+      await page.setViewportSize(size);
+      await buttons.last().scrollIntoViewIfNeeded();
+      const boxes = await buttons.evaluateAll((nodes) => nodes.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+      }));
+      check(boxes.every((box) => box.width >= 64 && box.height >= 64 && box.left >= 0 && box.right <= size.width)
+        && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        `S3 ${grade}º all picture buttons fit ${size.width}px screens and exceed the 44px touch minimum`);
+    }
+    await page.setViewportSize({ width: 768, height: 1024 });
+    const emojis = ranking.locator(".ranking-emoji");
+    const selection = ranking.locator(".ranking-lock-selection");
+    const clear = ranking.getByRole("button", { name: "Borrar emojis", exact: true });
+    const save = ranking.getByRole("button", { name: "Guardar", exact: true });
+    const status = ranking.locator('[role="status"]');
+    check((await ranking.innerText()).includes("Elige 2 emojis secretos y recuérdalos: la próxima vez que uses este nombre te los pediré.")
+      && (await selection.innerText()).includes("0/2") && await save.isDisabled(),
+      `S3 ${grade}º explains the two-emoji lock and starts incomplete`);
+    await fillLock(ranking, [0, 1]);
+    await ranking.locator("form").evaluate((form) => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    check(await save.isDisabled() && adds.length === 0 && (await selection.innerText()).includes("🍎 ⭐ (2/2)"),
+      `S3 ${grade}º even two emojis and a forced submit cannot save without a picture`);
+    await clear.click();
+    check(await save.isDisabled() && (await selection.innerText()).includes("ninguno (0/2)"),
+      `S3 ${grade}º Borrar emojis clears both choices and the counter`);
+    if (grade === 2) {
+      await page.evaluate(() => {
+        window.picturePointers = [];
+        document.addEventListener("pointerdown", (event) => window.picturePointers.push(event.pointerType), true);
+      });
+      await buttons.first().scrollIntoViewIfNeeded();
+      const box = await buttons.first().boundingBox();
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+      check(await page.evaluate(() => window.picturePointers.includes("touch")) && await buttons.first().getAttribute("aria-pressed") === "true",
+        "S3 a real touch selects a picture in 2º");
+    } else {
+      await buttons.first().focus();
+      await page.keyboard.press("Enter");
+      check(await buttons.first().getAttribute("aria-pressed") === "true", "S3 Enter selects a picture in 1º");
+    }
+    await pictures.getByRole("button", { name: "rana", exact: true }).click();
+    await pictures.getByRole("button", { name: "rana", exact: true }).click();
+    check(await pictures.getByRole("button", { pressed: true }).count() === 1
+      && await pictures.getByRole("button", { name: "rana", pressed: true }).count() === 1 && await save.isDisabled(),
+      `S3 ${grade}º a different picture replaces the selection, and tapping it again cannot clear it`);
+    await buttons.first().focus();
+    await page.keyboard.press("Space");
+    check(await pictures.getByRole("button", { pressed: true }).count() === 1
+      && await buttons.first().getAttribute("aria-pressed") === "true", `S3 ${grade}º Space selects a picture with the keyboard`);
+    await emojis.nth(0).click();
+    check(await save.isDisabled() && (await selection.innerText()).includes("🍎 (1/2)"), `S3 ${grade}º one emoji is not enough`);
+    await emojis.nth(1).click();
+    await emojis.nth(2).click();
+    check(await save.isEnabled() && (await selection.innerText()).includes("🍎 ⭐ (2/2)")
+      && !(await selection.innerText()).includes("🐶"), `S3 ${grade}º a third tap cannot change a complete two-emoji lock`);
+    await clear.click();
+    await fillLock(ranking, [0, 0]);
+    check(await save.isEnabled() && (await selection.innerText()).includes("🍎 🍎 (2/2)"),
+      `S3 ${grade}º repeated emojis are allowed`);
+    await clear.click();
+    await fillLock(ranking, [0, 1]);
+    const score = await pointsOnScreen(page);
+    await save.click();
+    const badPicture = "Ese no es el dibujo de la pizarra. Mira bien y prueba otra vez.";
+    await page.waitForFunction((text) => document.querySelector('#ranking [role="status"]')?.textContent === text, badPicture, { polling: 100 });
+    check(adds.length === 1 && adds[0].method === "GET" && adds[0].params.key === "león" && adds[0].params.lock === "0,1"
+      && adds[0].params.grade === String(grade) && adds[0].params.points === String(score)
+      && Object.keys(adds[0].params).sort().join(",") === "action,adjective,animal,grade,key,lock,points"
+      && await save.isEnabled() && await buttons.first().getAttribute("aria-pressed") === "true"
+      && (await selection.innerText()).includes("🍎 ⭐ (2/2)"),
+      `S3/L8 ${grade}º sends the accented picture word and two indices; a bad picture keeps both choices for retry`);
+    await page.locator(".overlay .play-btn").click({ force: true });
+    const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+    check(await warning.count() === 1, `S3 ${grade}º a refused picture still opens the unsaved warning`);
+    if (await warning.count() !== 1) return;
+    await warning.getByRole("button", { name: "Guardar primero" }).click();
+    check(adds.length === 1 && await status.textContent() === badPicture && await buttons.first().getAttribute("aria-pressed") === "true"
+      && (await selection.innerText()).includes("🍎 ⭐ (2/2)"), `S3 ${grade}º the warning preserves the picture, lock and refusal`);
+    await pictures.getByRole("button", { name: "rana", exact: true }).click();
+    await save.click();
+    const wrongGrade = `Con el dibujo de ${grade + 1}º no puedes entrar en el ranking de ${grade}º.`;
+    await page.waitForFunction((text) => document.querySelector('#ranking [role="status"]')?.textContent === text, wrongGrade, { polling: 100 });
+    check(adds.length === 2 && adds[1].params.key === "rana" && adds[1].params.lock === "0,1" && await save.isEnabled()
+      && (await selection.innerText()).includes("🍎 ⭐ (2/2)"), `S3/L7 ${grade}º a different grade's picture keeps this form's two-emoji lock`);
+    for (const word of ["girasol", "tren", "fresa"]) {
+      const before = adds.length;
+      await pictures.getByRole("button", { name: word, exact: true }).click();
+      await save.click();
+      await page.waitForFunction((text) => document.querySelector('#ranking [role="status"]')?.textContent === text, badPicture, { polling: 100 });
+      check(adds.length === before + 1 && adds[before].params.key === word && adds[before].params.lock === "0,1" && await save.isEnabled(),
+        `S3/L8 ${grade}º sends the exact word ${word} and keeps the lock after a bad picture`);
+    }
+    await pictures.getByRole("button", { name: "tortuga", exact: true }).click();
+    await save.click();
+    await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
+    check(adds.length === 6 && adds[5].params.key === "tortuga" && adds[5].params.lock === "0,1" && await save.isDisabled()
+      && (grade !== 2 || (await ranking.locator("ol li").textContent()).includes("(de 1º)")),
+      `S3/L7 ${grade}º saves another picture without re-entering emojis, including a younger grade's key`);
+    noExceptions(game, `S3 picture key and lock in ${grade}º`);
+  } finally {
+    await game.browser.close();
+  }
+}
+
+// The old written key and three-emoji contract remains intact for every older grade.
+async function olderGradeForms() {
+  const adds = [];
+  const game = await gameWithClock(async (route) => {
+    const url = new URL(route.request().url());
+    const grade = Number(url.searchParams.get("grade"));
+    if (url.searchParams.get("action") === "add") adds.push(Object.fromEntries(url.searchParams));
+    return reply(route, response([{ name: "Tigre Veloz", points: 100 }], grade));
+  });
+  try {
+    const { page } = game;
+    for (const grade of [3, 4, 5, 6]) {
+      if (grade > 3) await page.reload();
+      await chooseGrade(page, grade);
+      for (let level = 0; level < 3; level++) {
+        const result = await finishWithClock(page);
+        if (!result.finished) throw new Error(`Could not reach the ${grade}º checkpoint`);
+      }
+      const ranking = page.locator("#ranking");
+      const key = ranking.getByLabel("Clave de clase");
+      const save = ranking.getByRole("button", { name: "Guardar", exact: true });
+      const selection = ranking.locator(".ranking-lock-selection");
+      check(await pictureGroup(ranking).count() === 0 && await key.count() === 1
+        && (await ranking.innerText()).includes("Elige 3 emojis secretos") && (await selection.innerText()).includes("0/3"),
+        `S3 ${grade}º retains the written key and a three-emoji lock, with no picture group`);
+      if (await key.count() !== 1) continue;
+      await fillLock(ranking, [0, 1]);
+      check(await save.isDisabled() && (await selection.innerText()).includes("2/3"), `S3 ${grade}º two emojis are not enough`);
+      await fillLock(ranking, [2]);
+      check(await save.isEnabled() && (await selection.innerText()).includes("🍎 ⭐ 🐶 (3/3)"),
+        `S3 ${grade}º three emojis enable the existing form`);
+      const before = adds.length;
+      await ranking.locator("form").evaluate((form) => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+      check(adds.length === before && await ranking.locator('[role="status"]').textContent() === "Escribe la clave de tu clase.",
+        `S3 ${grade}º an empty written key still shows the existing message`);
+      // A 6º player may enter a younger grade's picture word; the form still sends three indices.
+      const typedKey = grade === 6 ? "león" : "sol";
+      await key.fill(typedKey);
+      await save.click();
+      await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
+      const add = adds[before];
+      check(adds.length === before + 1 && add.grade === String(grade) && add.level === "3" && add.key === typedKey && add.lock === "0,1,2",
+        `S3/L7 ${grade}º sends the typed word and three indices at the level-3 checkpoint`);
+    }
+    noExceptions(game, "S3 older-grade forms");
+  } finally {
+    await game.browser.close();
+  }
+}
+
 // S4: every grade starts a new run after the final summary, while a loss
 // retries the same level instead of returning to the beginning.
 async function replayEveryGrade() {
@@ -579,16 +775,16 @@ async function keyErrors() {
   const adds = [];
   const game = await gameWithClock(async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("action") !== "add") return reply(route, response([], 1));
+    if (url.searchParams.get("action") !== "add") return reply(route, response([], 3));
     adds.push(url);
     const key = url.searchParams.get("key");
     if (key === "rayo") return reply(route, { ok: false, error: "wrong grade", keyGrade: 6 });
     if (key !== "sol") return reply(route, { ok: false, error: "bad key" });
-    return reply(route, response([{ name: "Panda Feliz", points: 900, from: 1 }, { name: "Lobo Leal", points: 800 }], 1));
+    return reply(route, response([{ name: "Panda Feliz", points: 900, from: 1 }, { name: "Lobo Leal", points: 800 }], 3));
   });
   try {
     const { page } = game;
-    await win(page, 1);
+    await win(page, 3);
     const ranking = page.locator("#ranking");
     const present = await ranking.count() === 1;
     check(present, "S2 key errors scenario has a ranking form");
@@ -603,7 +799,7 @@ async function keyErrors() {
       "S2 an empty key asks for it and contacts nobody");
     for (const [typed, message, label] of [
       ["patata", "Esa clave no es correcta. Pregúntasela a tu profe.", "a wrong key"],
-      ["rayo", "Con la clave de 6º no puedes entrar en el ranking de 1º.", "an older grade's key"],
+      ["rayo", "Con la clave de 6º no puedes entrar en el ranking de 3º.", "an older grade's key"],
     ]) {
       await key.fill(typed);
       const before = adds.length;
@@ -630,14 +826,14 @@ async function lockPickerAndRetry() {
   const adds = [];
   const game = await gameWithClock(async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("action") !== "add") return reply(route, response([], 2));
+    if (url.searchParams.get("action") !== "add") return reply(route, response([], 4));
     adds.push(Object.fromEntries(url.searchParams));
     if (adds.length < 3) return reply(route, { ok: false, error: "name taken" });
-    return reply(route, response([{ name: "Panda Veloz", points: Number(url.searchParams.get("points")) }], 2));
+    return reply(route, response([{ name: "Panda Veloz", points: Number(url.searchParams.get("points")) }], 4));
   });
   try {
     const { page } = game;
-    await win(page, 2);
+    await win(page, 4);
     const ranking = page.locator("#ranking");
     const emojis = ranking.locator(".ranking-emoji");
     const selection = ranking.locator(".ranking-lock-selection");
@@ -738,10 +934,11 @@ async function levelThree(grade = 3) {
       `S6 ${grade}º is offered the ranking after level 3`);
     await ranking.locator('select[name="animal"]').selectOption("Panda");
     await ranking.locator('select[name="adjective"]').selectOption("Feliz");
-    await fillKey(ranking, "sol");
+    await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 2, null, { polling: 100 });
-    check(adds.length === 1 && adds[0].level === "3" && adds[0].grade === String(grade) && adds[0].key === "sol" && adds[0].lock === "0,1,2",
+    check(adds.length === 1 && adds[0].level === "3" && adds[0].grade === String(grade)
+      && adds[0].key === (grade <= 2 ? "león" : "sol") && adds[0].lock === (grade <= 2 ? "0,1" : "0,1,2"),
       `S6 the level-3 save tells the server the level (${JSON.stringify(adds[0])})`);
     check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["🏆 Lobo Leal — 300", "🥇 Panda Feliz — 900"])
       && await ranking.getByText(`Tu mejor marca: 900 · Estás en el puesto 2 de ${grade}º`, { exact: true }).isVisible()
@@ -755,10 +952,11 @@ async function levelThree(grade = 3) {
     await page.waitForFunction(() => !document.querySelector(".trophy-flight"), null, { polling: 100 });
     check(fourth.finished && await ranking.count() === 1 && !(await ranking.innerText()).includes("Nivel 3 superado"),
       "S6 finishing level 4 still offers the normal ranking");
-    await fillKey(ranking, "sol");
+    await fillKey(ranking);
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction((n) => document.querySelectorAll("#ranking ol li").length === n, 2, { polling: 100 });
-    check(adds.length === 2 && !("level" in adds[1]), `S6 the level-4 save sends no level, as before (${JSON.stringify(adds[1])})`);
+    check(adds.length === 2 && !("level" in adds[1]) && adds[1].key === (grade <= 2 ? "león" : "sol")
+      && adds[1].lock === (grade <= 2 ? "0,1" : "0,1,2"), `S6 the level-4 save sends no level, as before (${JSON.stringify(adds[1])})`);
     await page.locator(".overlay .play-btn").click({ force: true });
     check(await page.evaluate(() => document.body.dataset.level === "0"), `S4 ${grade}º starts level 1 after its final ranking, not after the level-3 ranking`);
     noExceptions(game, `S6 level three in ${grade}º`);
@@ -1023,9 +1221,10 @@ async function startPreview() {
 }
 
 (async () => {
-  for (const [label, run] of [["lock picker and retry", lockPickerAndRetry], ["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
+  for (const [label, run] of [["picture key and lock in 1º", () => pictureKeyAndLock(1)], ["picture key and lock in 2º", () => pictureKeyAndLock(2)],
+    ["older-grade forms", olderGradeForms], ["lock picker and retry", lockPickerAndRetry], ["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
-    ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["level three in 1º", () => levelThree(1)], ["level three in 6º", () => levelThree(6)],
+    ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["level three in 1º", () => levelThree(1)], ["level three in 2º", () => levelThree(2)], ["level three in 6º", () => levelThree(6)],
     ["S6 unsaved final warning", unsavedFinalWarning], ["S6 unsaved checkpoint touch", unsavedCheckpointTouch], ["S6 unavailable and ordinary play", unavailableAndOrdinaryPlay], ["start preview", startPreview]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }
   }

@@ -81,6 +81,14 @@
       #ranking input { width: 8em; }
       #ranking button { background: #b9eff8; font-weight: bold; }
       #ranking button:disabled { opacity: .55; }
+      #ranking .ranking-pictures { box-sizing: border-box; width: 100%; min-width: 0; margin: 0; padding: 4px 8px 8px; border: 1px solid #24334b; border-radius: 9px; }
+      #ranking .ranking-pictures legend { font-weight: bold; }
+      #ranking .ranking-picture-grid { display: grid; grid-template-columns: repeat(3, minmax(64px, 1fr)); gap: 6px; }
+      #ranking .ranking-picture { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 64px; min-height: 72px; padding: 4px; line-height: 1.05; cursor: pointer; }
+      #ranking .ranking-picture-icon { font-size: 36px; line-height: 1; }
+      #ranking .ranking-picture-word { margin-top: 2px; font-size: 14px; }
+      #ranking .ranking-picture[aria-pressed="true"] { background: #ffda55; box-shadow: inset 0 0 0 2px #24334b; }
+      #ranking .ranking-picture:focus-visible { outline: 3px solid #e0404a; outline-offset: 2px; }
       #ranking .ranking-lock { box-sizing: border-box; width: 100%; min-width: 0; margin: 0; padding: 4px 8px 8px; border: 1px solid #24334b; border-radius: 9px; }
       #ranking .ranking-lock legend { font-weight: bold; }
       #ranking .ranking-emoji-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: 4px; }
@@ -969,6 +977,8 @@
         "Ágil", "Fuerte", "Alegre", "Leal", "Tenaz", "Imparable", "Increíble", "Elegante", "Sonriente"];
       // The indices, in this order, are the lock sent to the server.
       const RANKING_EMOJIS = ["🍎", "⭐", "🐶", "🚀", "⚽", "🌈", "🍕", "🐱", "🎈", "🌙", "🍦", "🦋"];
+      // The server keeps the same picture keys in the same order (ranking/Code.gs).
+      const RANKING_PICTURE_KEYS = ["🦁 león", "🐸 rana", "🌻 girasol", "🚂 tren", "🐢 tortuga", "🍓 fresa"];
 
       // Grades that may also enter the ranking after level 3 (the server keeps the same list).
       const RANKING_LEVEL_THREE_GRADES = [1, 2, 3, 4, 5, 6];
@@ -1050,28 +1060,64 @@
         }
         const animal = select("Animal", "animal", RANKING_ANIMALS);
         const adjective = select("Adjetivo", "adjective", RANKING_ADJECTIVES);
-        // S2: the class key the teacher writes on the board; it also tells the child's grade.
-        const keyLabel = document.createElement("label");
-        keyLabel.textContent = "Clave de clase";
-        const key = document.createElement("input");
-        key.type = "text";
-        key.name = "key";
-        key.maxLength = 20;
-        key.autocomplete = "off";
-        key.setAttribute("autocapitalize", "none");
-        key.spellcheck = false;
-        keyLabel.appendChild(key);
-        form.appendChild(keyLabel);
+        // The key type and lock length follow the grade played, not the key's grade.
+        const usesPictures = resultGrade === 1 || resultGrade === 2;
+        const lockLength = usesPictures ? 2 : 3;
+        let key = null, pictureField = null, selectedPicture = "";
+        if (usesPictures) {
+          pictureField = document.createElement("fieldset");
+          pictureField.className = "ranking-pictures";
+          const pictureLegend = document.createElement("legend");
+          pictureLegend.textContent = "Dibujo de la pizarra";
+          const pictures = document.createElement("div");
+          pictures.className = "ranking-picture-grid";
+          for (const picture of RANKING_PICTURE_KEYS) {
+            const [emoji, word] = picture.split(" ");
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "ranking-picture";
+            button.setAttribute("aria-label", word);
+            button.setAttribute("aria-pressed", "false");
+            const icon = document.createElement("span");
+            icon.className = "ranking-picture-icon";
+            icon.textContent = `${emoji} `;
+            const text = document.createElement("span");
+            text.className = "ranking-picture-word";
+            text.textContent = word;
+            button.append(icon, text);
+            button.addEventListener("click", () => {
+              if (submitted) return;
+              selectedPicture = word;
+              for (const other of pictures.children) other.setAttribute("aria-pressed", String(other === button));
+              updateLock();
+            });
+            pictures.appendChild(button);
+          }
+          pictureField.append(pictureLegend, pictures);
+          form.appendChild(pictureField);
+        } else {
+          const keyLabel = document.createElement("label");
+          keyLabel.textContent = "Clave de clase";
+          key = document.createElement("input");
+          key.type = "text";
+          key.name = "key";
+          key.maxLength = 20;
+          key.autocomplete = "off";
+          key.setAttribute("autocapitalize", "none");
+          key.spellcheck = false;
+          keyLabel.appendChild(key);
+          form.appendChild(keyLabel);
+        }
         const lockField = document.createElement("fieldset");
         lockField.className = "ranking-lock";
         const legend = document.createElement("legend");
         legend.textContent = "Emojis secretos";
         const hint = document.createElement("p");
-        hint.textContent = "Elige 3 emojis secretos y recuérdalos: la próxima vez que uses este nombre te los pediré.";
+        hint.textContent = `Elige ${lockLength} emojis secretos y recuérdalos: la próxima vez que uses este nombre te los pediré.`;
         const selection = document.createElement("p");
         selection.className = "ranking-lock-selection";
         selection.setAttribute("aria-live", "polite");
-        selection.textContent = "Tus emojis: ninguno (0/3)";
+        selection.textContent = `Tus emojis: ninguno (0/${lockLength})`;
         const grid = document.createElement("div");
         grid.className = "ranking-emoji-grid";
         const chosen = [];
@@ -1081,7 +1127,7 @@
           button.className = "ranking-emoji";
           button.textContent = emoji;
           button.addEventListener("click", () => {
-            if (submitted || chosen.length >= 3) return;
+            if (submitted || chosen.length >= lockLength) return;
             chosen.push(index);
             updateLock();
           });
@@ -1183,9 +1229,10 @@
         }, true);
         function updateLock() {
           const picked = chosen.map((index) => RANKING_EMOJIS[index]).join(" ");
-          selection.textContent = `Tus emojis: ${picked || "ninguno"} (${chosen.length}/3)`;
-          save.disabled = submitted || chosen.length !== 3;
+          selection.textContent = `Tus emojis: ${picked || "ninguno"} (${chosen.length}/${lockLength})`;
+          save.disabled = submitted || chosen.length !== lockLength || (usesPictures && !selectedPicture);
           lockField.disabled = submitted;
+          if (pictureField) pictureField.disabled = submitted;
         }
         // The server refused the key or name: nothing was saved, so the child may try again.
         class RetryableRefusal extends Error {
@@ -1197,9 +1244,13 @@
           const response = await fetch(url.toString());
           if (!response.ok) throw new Error("Ranking request failed");
           const result = await response.json();
-          if (result && result.ok === false && result.error === "bad key") throw new RetryableRefusal("Esa clave no es correcta. Pregúntasela a tu profe.");
+          if (result && result.ok === false && result.error === "bad key") {
+            throw new RetryableRefusal(usesPictures
+              ? "Ese no es el dibujo de la pizarra. Mira bien y prueba otra vez."
+              : "Esa clave no es correcta. Pregúntasela a tu profe.");
+          }
           if (result && result.ok === false && result.error === "wrong grade" && /^[1-6]$/.test(String(result.keyGrade))) {
-            throw new RetryableRefusal(`Con la clave de ${result.keyGrade}º no puedes entrar en el ranking de ${resultGrade}º.`);
+            throw new RetryableRefusal(`Con ${usesPictures ? "el dibujo" : "la clave"} de ${result.keyGrade}º no puedes entrar en el ranking de ${resultGrade}º.`);
           }
           if (result && result.ok === false && result.error === "name taken") {
             throw new RetryableRefusal("Ese nombre ya es de un compañero con otros emojis. Elige otro nombre o revisa tus emojis.");
@@ -1227,10 +1278,11 @@
         form.addEventListener("submit", async (event) => {
           event.preventDefault();
           // Even a failed response may have followed a successful server write.
-          if (submitted || chosen.length !== 3) return;
-          if (!key.value.trim()) {
-            message.textContent = "Escribe la clave de tu clase.";
-            key.focus();
+          if (submitted || chosen.length !== lockLength) return;
+          const keyValue = usesPictures ? selectedPicture : key.value.trim();
+          if (!keyValue) {
+            message.textContent = usesPictures ? "Elige el dibujo de la pizarra." : "Escribe la clave de tu clase.";
+            (usesPictures ? pictureField.querySelector("button") : key).focus();
             return;
           }
           submitted = true;
@@ -1241,7 +1293,7 @@
           const name = `${animal.value} ${adjective.value}`;
           message.textContent = "Guardando…";
           try {
-            const result = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: key.value.trim(), lock: chosen.join(","), ...(resultLevel === 3 ? { level: 3 } : {}) });
+            const result = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: keyValue, lock: chosen.join(","), ...(resultLevel === 3 ? { level: 3 } : {}) });
             rankingAvailable = true;
             // An older server sends no "me": then nothing personal is shown, as before.
             const me = result.me;

@@ -24,6 +24,7 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
       : /^\d{4}-\d{1,2}(-\d{1,2})?$/.test(value) ? new FixedDate(`${value}-01T00:00:00Z`.slice(0, 20)) : value);
     const sheet = {
       rows,
+      writes: 0,
       appendRow: (row) => { rows.push(row.map(cell)); },
       getLastRow: () => rows.length,
       deleteRows: (start, count) => { rows.splice(start - 1, count); },
@@ -34,6 +35,7 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
         setValue: (value) => { sheet.getRange(row, column).setValues([[value]]); },
         setValues: (values) => {
           if (values.length !== height || values.some((r) => r.length !== width)) throw new Error("setValues size mismatch");
+          sheet.writes++;
           values.forEach((r, i) => r.forEach((value, j) => {
             while (rows.length < row + i) rows.push([]);
             rows[row - 1 + i][column - 1 + j] = cell(value);
@@ -104,14 +106,17 @@ function load(now = "2026-11-14T10:00:00Z", sheets = {}, properties = { BOT_SECR
 }
 
 const SECRET = "test-secret-123456";
-// S5: a key a child can remember is a word plus a two-digit number.
+// S5: word keys are a word plus a two-digit number; S3/L8 adds six picture keys.
 const KEY_SHAPE = /^[a-záéíóúüñ]+ [0-9]{2}$/;
+const PICTURE_KEYS = ["🦁 león", "🐸 rana", "🌻 girasol", "🚂 tren", "🐢 tortuga", "🍓 fresa"];
 const fold = (word) => word.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 // By default each score brings the right class key of its own grade.
 const add = (game, fields) => {
   const grade = fields.grade ?? "5";
   const key = "key" in fields ? fields.key : (game.keys() || {})[grade] ?? "";
-  return game.json({ action: "add", animal: "Tigre", adjective: "Veloz", grade, points: "1200", ...fields, key });
+  // Like the real game, 1º and 2º always send their two-emoji lock (ranking-justo L9).
+  const lock = "lock" in fields || !["1", "2"].includes(String(grade)) ? {} : { lock: "0,1" };
+  return game.json({ action: "add", animal: "Tigre", adjective: "Veloz", grade, points: "1200", ...lock, ...fields, key });
 };
 const sheetKeys = (game) => (game.sheets.Claves ? game.sheets.Claves.rows.slice(1).map((r) => r.slice()) : []);
 
@@ -212,14 +217,15 @@ function readKeys() {
   const values = Object.values(result.keys || {});
   check(result.ok === true && result.month === "2026-11" && Object.keys(result.keys || {}).join() === "1,2,3,4,5,6",
     `S3 the bot gets the keys of the six grades and their month (${JSON.stringify(result)})`);
-  check(values.length === 6 && new Set(values).size === 6 && values.every((k) => KEY_SHAPE.test(k)),
-    `S5 the six keys are different easy words with a number (${values.join(",")})`);
-  const words = values.map((k) => k.split(" ")[0]);
-  check(new Set(words).size === 6, `S5 no two grades share the same word, even with a different number (${words.join(",")})`);
+  check(values.length === 6 && values.slice(0, 2).every((k) => PICTURE_KEYS.includes(k)) && values[0] !== values[1]
+    && values.slice(2).every((k) => KEY_SHAPE.test(k)) && new Set(values).size === 6,
+    `S3/L8 the bot gets two distinct canonical pictures and four different word keys (${values.join(",")})`);
+  const words = values.slice(2).map((k) => k.split(" ")[0]);
+  check(new Set(words).size === 4, `S5 no two word grades share the same word, even with a different number (${words.join(",")})`);
   const seen = new Set();
-  for (let i = 0; i < 40; i++) Object.values(load().keys()).forEach((k) => seen.add(k));
+  for (let i = 0; i < 40; i++) Object.values(load().keys()).slice(2).forEach((k) => seen.add(k));
   check([...seen].every((k) => KEY_SHAPE.test(k)) && seen.size > 120,
-    `S5 every month mints new word keys, so the space stays large (${seen.size} different in 40 months)`);
+    `S5 every month mints new word keys for 3º-6º, so the space stays large (${seen.size} different in 40 months)`);
   check(sheetKeys(game).map((r) => `${r[0]}|${r[1]}|${r[2]}`).join(";") === values.map((k, i) => `${i + 1}|${k}|2026-11`).join(";")
     && game.sheets.Claves.rows[0].join("|") === "Curso|Clave|Mes", "S3 the keys live in the «Claves» tab of the sheet (Curso|Clave|Mes)");
   check(JSON.stringify(game.post({ action: "keys", secret: SECRET }).keys) === JSON.stringify(result.keys), "S4 the keys stay the same within the month");
@@ -294,9 +300,31 @@ function monthlyRotation() {
   check(new Set(values).size === 6 && sheetKeys(november).every((r) => r[2] === "2026-11"), "S4 the new keys are distinct and stamped with the new month");
   check(add(november, { grade: "5", key: old["5"] }).error === "bad key" && add(november, { grade: "5" }).ok === true,
     "S4 last month's key stops working and the new one works");
+  for (const grade of [1, 2]) {
+    const before = allSheets(november);
+    const expired = add(november, { grade: String(grade), key: old[grade].split(" ")[1], lock: "1,2" });
+    check(same(expired, { ok: false, error: "bad key" }) && allSheets(november) === before,
+      `S3/L7 last month's ${grade}º picture word stops working without writes`);
+    const valid = add(november, { grade: String(grade), key: fresh.keys[grade].split(" ")[0], lock: "1,2" });
+    check(same(valid, expectedAdd(grade, "2026-11", [{ name: "Tigre Veloz", points: 1200 }], expectedMe("Tigre Veloz", 1200, 1, 1)))
+      && validHash(november.rows().at(-1)[7], "1,2"), `S3/L7 the new ${grade}º picture emoji works with a two-index lock`);
+  }
   const viaGame = load("2026-12-01T09:00:00Z", october.sheets);
   add(viaGame, { grade: "5", key: "x" });
   check(sheetKeys(viaGame).every((r) => r[2] === "2026-12"), "S4 the rotation also happens when the first request of the month comes from the game");
+
+  const crowded = load("2026-10-31T10:00:00Z");
+  crowded.keys();
+  const oldRows = ["🦁 león", "🐸 rana", "girasol", "tren", "tortuga", "fresa"];
+  oldRows.forEach((key, i) => { crowded.sheets.Claves.rows[i + 1] = [i + 1, key, "2026-10"]; });
+  const next = load("2026-11-01T10:00:00Z", crowded.sheets);
+  vm.runInContext("Math.random = function () { return 0; }", next.context);
+  const renewed = next.post({ action: "keys", secret: SECRET });
+  check(renewed.ok === true && renewed.month === "2026-11"
+    && PICTURE_KEYS.includes(renewed.keys[1]) && PICTURE_KEYS.includes(renewed.keys[2])
+    && renewed.keys[1] !== renewed.keys[2] && [renewed.keys[1], renewed.keys[2]].every((p) => !oldRows.slice(0, 2).includes(p))
+    && [3, 4, 5, 6].every((g) => KEY_SHAPE.test(renewed.keys[g])),
+    "S3/L7 even when all picture words were used last month, new-month pictures differ from the previous pictures");
 }
 
 // S1-S2: the key decides who may enter which ranking.
@@ -384,7 +412,7 @@ function handEdits() {
   setRow(junk, 2, "a1");
   junk.sheets.Claves.rows.push([9, "mesa", "2026-11"], ["", "nota de la profe", ""]);
   const cleaned = junk.keys();
-  check(cleaned[2] !== "a1" && KEY_SHAPE.test(cleaned[2]) && [1, 3, 4, 5, 6].every((g) => cleaned[g] === same[g])
+  check(cleaned[2] !== "a1" && PICTURE_KEYS.includes(cleaned[2]) && [1, 3, 4, 5, 6].every((g) => cleaned[g] === same[g])
     && tabOf(junk).length === 7 && add(junk, { grade: "6", key: "mesa" }).error === "bad key",
     `S3 an invalid key is replaced and extra rows are removed and never accepted (${tabOf(junk).length} rows)`);
 }
@@ -400,7 +428,7 @@ function keyPool() {
   check(new Set(pool.map(fold)).size === pool.length, "S5 no two pool words read the same once accents are ignored");
   check(pool.every((w) => blocked.indexOf(w) < 0), `S5 the pool never holds a blocked word (${pool.filter((w) => blocked.indexOf(w) >= 0).join(",")})`);
   const minted = new Set();
-  for (let i = 0; i < 20; i++) Object.values(load().keys()).forEach((k) => minted.add(k.split(" ")[0]));
+  for (let i = 0; i < 20; i++) Object.values(load().keys()).slice(2).forEach((k) => minted.add(k.split(" ")[0]));
   check([...minted].every((w) => pool.indexOf(w) >= 0), `S5 every minted word comes from the pool (${[...minted].filter((w) => pool.indexOf(w) < 0).join(",")})`);
   check(pool.length * 90 >= 20000, `S5 words plus a two-digit number give ${pool.length * 90} combinations instead of 5,625 meaningless syllables`);
 }
@@ -414,14 +442,36 @@ function rotate() {
   check(refused.ok === false && JSON.stringify(sheetKeys(game)) === snapshot, "S5 rotate needs the bot secret and changes nothing without it");
   const result = game.post({ action: "rotate", secret: SECRET });
   const values = Object.values(result.keys || {});
-  check(result.ok === true && result.month === "2026-11" && values.length === 6 && values.every((k) => KEY_SHAPE.test(k))
+  check(result.ok === true && result.month === "2026-11" && values.length === 6
+    && values.slice(0, 2).every((k) => PICTURE_KEYS.includes(k)) && values.slice(2).every((k) => KEY_SHAPE.test(k))
     && new Set(values).size === 6 && values.every((k) => !Object.values(before).includes(k)),
-    `S5 rotate mints six new word keys for the same month (${JSON.stringify(before)} -> ${JSON.stringify(result.keys)})`);
+    `S3/L8 rotate mints two distinct pictures and four fresh words for the same month (${JSON.stringify(before)} -> ${JSON.stringify(result.keys)})`);
   check(JSON.stringify(sheetKeys(game).map((r) => `${r[0]}|${r[1]}|${r[2]}`)) === JSON.stringify(values.map((k, i) => `${i + 1}|${k}|2026-11`)),
     "S5 rotate writes the new keys to the «Claves» tab of the current month");
   check(add(game, { grade: "4", key: before["4"] }).error === "bad key" && add(game, { grade: "4", key: result.keys["4"] }).ok === true,
     "S5 after rotating, the old key is dead and the new one works at once");
+  for (const grade of [1, 2]) {
+    const snapshot = allSheets(game);
+    const expired = add(game, { grade: String(grade), key: before[grade].split(" ")[1], lock: "1,2" });
+    check(same(expired, { ok: false, error: "bad key" }) && allSheets(game) === snapshot,
+      `S3/L8 after rotate the old ${grade}º picture word is refused without writes`);
+    const valid = add(game, { grade: String(grade), key: result.keys[grade].split(" ")[1], lock: "1,2" });
+    check(same(valid, expectedAdd(grade, "2026-11", [{ name: "Tigre Veloz", points: 1200 }], expectedMe("Tigre Veloz", 1200, 1, 1)))
+      && validHash(game.rows().at(-1)[7], "1,2"), `S3/L8 after rotate the new ${grade}º picture word works immediately`);
+  }
   check(JSON.stringify(game.keys()) === JSON.stringify(result.keys), "S5 the rotated keys stay for the rest of the month");
+
+  const october = load("2026-10-31T10:00:00Z");
+  vm.runInContext("Math.random = function () { return 0; }", october.context);
+  const octoberKeys = october.keys();
+  const november = load("2026-11-01T10:00:00Z", october.sheets);
+  vm.runInContext("Math.random = function () { return 0; }", november.context);
+  const firstRotate = november.post({ action: "rotate", secret: SECRET });
+  check(firstRotate.ok === true && firstRotate.month === "2026-11" && PICTURE_KEYS.includes(firstRotate.keys[1])
+    && PICTURE_KEYS.includes(firstRotate.keys[2]) && firstRotate.keys[1] !== firstRotate.keys[2]
+    && [firstRotate.keys[1], firstRotate.keys[2]].every((picture) => picture !== octoberKeys[1] && picture !== octoberKeys[2])
+    && sheetKeys(november).every((row) => row[2] === "2026-11"),
+    "S3/L7-L8 rotate as the first request of a month does not reuse either previous picture");
 }
 
 // S5: a «Claves» tab full of hand edits still answers and never hangs.
@@ -439,9 +489,10 @@ function crowdedTab() {
   const room = withRows(used);
   const fresh = room.keys();
   const values = Object.values(fresh);
-  check(values.length === 6 && values.every((k) => KEY_SHAPE.test(k)) && new Set(values).size === 6
-    && values.every((k) => used.indexOf(k.split(" ")[0]) < 0),
-    `S5 with the tab nearly full of hand-written words, six fresh ones still come out (${values.join(",")})`);
+  check(values.length === 6 && values.slice(0, 2).every((k) => PICTURE_KEYS.includes(k))
+    && values.slice(2).every((k) => KEY_SHAPE.test(k)) && new Set(values).size === 6
+    && values.slice(2).every((k) => used.indexOf(k.split(" ")[0]) < 0),
+    `S5 with the tab nearly full of hand-written words, four fresh words and two pictures still come out (${values.join(",")})`);
   const full = withRows(pool);
   const answer = JSON.parse(full.postRaw({ action: "keys", secret: SECRET }).text);
   check(answer.ok === false && answer.error === "server error",
@@ -502,6 +553,24 @@ function levelThreeEveryGrade() {
   const game = load();
   check(add(game, { grade: "7", level: "3" }).ok === false && add(game, { grade: "0", level: "3" }).ok === false
     && game.rows().length === 0, "C level 3 outside 1º-6º is refused, saving nothing");
+}
+
+// ranking-justo L9: 1º and 2º always need their two-emoji lock; 3º-6º still accept old pages without one.
+function lockRequiredInPictureGrades() {
+  for (const grade of ["1", "2"]) {
+    const game = load();
+    const keys = game.keys();
+    const before = allSheets(game);
+    const answer = game.json({ action: "add", animal: "Tigre", adjective: "Veloz", grade, points: "1200", key: keys[grade] });
+    check(answer.ok === false && answer.error === "bad lock" && game.rows().length === 0,
+      `L9 ${grade}º refuses a save without a lock, saving nothing (${JSON.stringify(answer)})`);
+    check(allSheets(game) === before, `L9 a refused ${grade}º save without a lock leaves every sheet unchanged`);
+    check(add(game, { grade, lock: "0,1" }).ok === true && game.rows().length === 1,
+      `L9 ${grade}º still saves with a two-emoji lock`);
+  }
+  const older = load();
+  check(add(older, { grade: "3" }).ok === true && older.rows().length === 1,
+    "L9 3º-6º still accept an old page without a lock");
 }
 
 // S2, S3, S5: a lock belongs to a name only for this grade and month.
@@ -794,6 +863,256 @@ function lockRejections() {
     && allSheets(brake) === locked && brake.rows().length === 1, "S5 wrong locks count toward the existing rate limit, without writes or a personal result");
 }
 
+// ranking-justo S3/L6-L8: 1º and 2º use canonical pictures, including hand edits and migration.
+function pictureSheets() {
+  const game = load();
+  check(same(Array.from(game.context.PICTURE_KEYS || []), PICTURE_KEYS)
+    && same(Array.from(game.context.PICTURE_GRADES || []), [1, 2]),
+    "S3/L8 the server exposes the six pictures in the agreed order and picture grades 1º-2º");
+  const initial = game.keys();
+  const tab = game.sheets.Claves;
+  const before = allSheets(game), writes = tab.writes;
+  check(same(game.keys(), initial) && allSheets(game) === before && tab.writes === writes,
+    "S3/L7 a tidy current-month picture/word sheet is read without being rewritten");
+
+  tab.rows[1] = [1, "  🦁  L E Ó N  ", "2026-11"];
+  tab.rows[2] = [2, "🐸", "2026-11"];
+  const canonical = game.keys();
+  check(canonical[1] === "🦁 león" && canonical[2] === "🐸 rana" && [3, 4, 5, 6].every((g) => canonical[g] === initial[g])
+    && tab.rows[1][1] === "🦁 león" && tab.rows[2][1] === "🐸 rana" && tab.writes === writes + 1,
+    "S3/L8 valid handwritten emoji/full aliases are kept, stored canonically and do not disturb word grades");
+  const canonicalWrites = tab.writes;
+  tab.rows[1][2] = new game.context.Date("2026-11-01T00:00:00Z");
+  check(same(game.keys(), canonical) && tab.writes === canonicalWrites,
+    "S3/L7 a canonical picture row with a Sheets date month remains tidy and is not rewritten");
+
+  tab.rows[1] = [1, "🦁", "2026-11"];
+  tab.rows[2] = [2, " LEON ", "2026-11"];
+  const deduplicated = game.keys();
+  check(PICTURE_KEYS.includes(deduplicated[1]) && PICTURE_KEYS.includes(deduplicated[2])
+    && deduplicated[1] !== deduplicated[2] && deduplicated[1] !== "🦁 león" && deduplicated[2] !== "🦁 león"
+    && [3, 4, 5, 6].every((g) => deduplicated[g] === initial[g]),
+    `S3/L8 duplicate aliases in 1º-2º are replaced without sharing a picture (${JSON.stringify(deduplicated)})`);
+
+  const migration = load();
+  const old = migration.keys();
+  migration.sheets.Claves.rows[1] = [1, "migración 94", "2026-11"];
+  migration.sheets.Claves.rows[2] = [2, "gramática 95", "2026-11"];
+  const migrated = migration.post({ action: "keys", secret: SECRET });
+  check(migrated.ok === true && migrated.month === "2026-11" && PICTURE_KEYS.includes(migrated.keys[1])
+    && PICTURE_KEYS.includes(migrated.keys[2]) && migrated.keys[1] !== migrated.keys[2]
+    && [3, 4, 5, 6].every((g) => migrated.keys[g] === old[g])
+    && sheetKeys(migration).every((r, i) => r[0] === i + 1 && r[1] === migrated.keys[i + 1] && r[2] === "2026-11"),
+    `S3/L7-L8 live migration replaces this month's word keys in 1º-2º and preserves 3º-6º (${JSON.stringify(migrated)})`);
+  const migratedWrites = migration.sheets.Claves.writes;
+  check(same(migration.keys(), migrated.keys) && migration.sheets.Claves.writes === migratedWrites,
+    "S3/L7 the migrated sheet stays tidy on the next request");
+
+  for (const grade of [1, 2]) {
+    const damaged = load();
+    const previous = damaged.keys();
+    const other = grade === 1 ? 2 : 1;
+    damaged.sheets.Claves.rows[grade] = [grade, "wrong 88", "2026-11"];
+    const repaired = damaged.keys();
+    check(PICTURE_KEYS.includes(repaired[grade]) && repaired[grade] !== repaired[other]
+      && repaired[other] === previous[other] && [3, 4, 5, 6].every((g) => repaired[g] === previous[g])
+      && sheetKeys(damaged)[grade - 1][1] === repaired[grade],
+      `S3/L8 repairing ${grade}º preserves the other picture and all four word grades`);
+  }
+
+  const constrained = load();
+  constrained.keys();
+  const occupied = ["🦁 león", "old word 88", "rana", "tren", "tortuga", "fresa"];
+  occupied.forEach((key, i) => { constrained.sheets.Claves.rows[i + 1] = [i + 1, key, "2026-11"]; });
+  const remaining = constrained.keys();
+  check(remaining[1] === "🦁 león" && remaining[2] === "🌻 girasol"
+    && [3, 4, 5, 6].every((g) => remaining[g] === occupied[g - 1]),
+    "S3/L8 minting a picture respects the other picture and all four handwritten word aliases");
+
+  const crowded = load();
+  const kept = crowded.keys();
+  PICTURE_KEYS.forEach((picture) => crowded.sheets.Claves.rows.push(["", picture, "2026-10"]));
+  const cleaned = crowded.post({ action: "keys", secret: SECRET });
+  check(cleaned.ok === true && PICTURE_KEYS.includes(cleaned.keys[1]) && PICTURE_KEYS.includes(cleaned.keys[2])
+    && cleaned.keys[1] !== cleaned.keys[2] && [3, 4, 5, 6].every((g) => cleaned.keys[g] === kept[g])
+    && crowded.sheets.Claves.rows.length === 7,
+    "S3/L8 extra rows mentioning every picture are removed and leave distinct pictures and intact word keys");
+}
+
+function pictureSetKey() {
+  const game = load();
+  for (const grade of [1, 2]) {
+    const other = grade === 1 ? 2 : 1;
+    for (const picture of PICTURE_KEYS) {
+      let keys = game.keys();
+      let prepared = true;
+      if (keys[other] === picture) {
+        const spare = PICTURE_KEYS.find((p) => p !== picture && p !== keys[grade]);
+        const moved = game.post({ action: "setkey", secret: SECRET, grade: String(other), key: spare });
+        prepared = moved.ok === true && moved.keys[other] === spare;
+      }
+      check(prepared && game.keys()[other] !== picture, `S3/L8 prepare a distinct picture for ${other}º`);
+      const [emoji, word] = picture.split(" ");
+      const forms = [emoji, `  ${word.toUpperCase()}  `, ` ${emoji}   ${word.toUpperCase()} `, ` ${emoji} ${word.split("").join(" ")} `];
+      if (word === "león") forms.push("leo\u0301n"); // a decomposed accent is also an accent
+      for (const form of forms) {
+        keys = game.keys();
+        const rows = sheetKeys(game), ranking = snapshot(game);
+        const answer = game.post({ action: "setkey", secret: SECRET, grade: String(grade), key: form });
+        rows[grade - 1][1] = picture;
+        check(same(answer, { ok: true, month: "2026-11", keys: { ...keys, [grade]: picture } })
+          && same(sheetKeys(game), rows) && snapshot(game) === ranking,
+          `S3/L8 setkey ${grade}º accepts ${JSON.stringify(form)} and stores ${picture} canonically`);
+      }
+    }
+  }
+  let keys = game.keys();
+  for (const grade of [1, 2]) {
+    const other = grade === 1 ? 2 : 1;
+    const [emoji, word = ""] = keys[other].split(" ");
+    for (const key of [emoji, word, keys[other], ` ${emoji} ${word.toUpperCase()} `]) {
+      const before = allSheets(game);
+      const answer = game.post({ action: "setkey", secret: SECRET, grade: String(grade), key });
+      check(same(answer, { ok: false, error: "key in use" }) && allSheets(game) === before,
+        `S3/L8 setkey ${grade}º refuses the other grade's picture alias ${JSON.stringify(key)} without writes`);
+    }
+    for (const key of ["", "sol", "león 12", "🦁 rana", "🦁🦁", "🐶", "🦁 león fresa", null]) {
+      const before = allSheets(game);
+      const answer = game.post({ action: "setkey", secret: SECRET, grade: String(grade), key });
+      check(same(answer, { ok: false, error: "bad key" }) && allSheets(game) === before,
+        `S3/L8 setkey ${grade}º rejects non-pictures ${JSON.stringify(key)} without writes`);
+    }
+  }
+  for (const grade of [3, 4, 5, 6]) {
+    for (const key of ["🦁", "🦁 león", "caca", "caca 12"]) {
+      const before = allSheets(game);
+      const answer = game.post({ action: "setkey", secret: SECRET, grade: String(grade), key });
+      check(same(answer, { ok: false, error: "bad key" }) && allSheets(game) === before,
+        `S3/L8 setkey ${grade}º rejects an invalid or blocked word key ${JSON.stringify(key)} without writes`);
+    }
+  }
+  keys = game.keys();
+  const spare = PICTURE_KEYS.find((picture) => picture !== keys[1] && picture !== keys[2]);
+  const [emoji, word] = spare.split(" ");
+  const wordSet = game.post({ action: "setkey", secret: SECRET, grade: "3", key: word });
+  check(wordSet.ok === true && wordSet.keys[3] === fold(word) && sheetKeys(game)[2][1] === fold(word)
+    && add(game, { grade: "3", key: word, lock: "0,1,2" }).ok === true,
+    "S3/L8 3º-6º still accept a valid handwritten word even if it names an unused picture");
+  let before = allSheets(game);
+  const clashPicture = game.post({ action: "setkey", secret: SECRET, grade: "1", key: emoji });
+  check(same(clashPicture, { ok: false, error: "key in use" }) && allSheets(game) === before,
+    "S3/L8 a picture cannot steal a word key already assigned to 3º-6º");
+  before = allSheets(game);
+  const pictureWord = keys[1].split(" ")[1];
+  const clashWord = game.post({ action: "setkey", secret: SECRET, grade: "4", key: pictureWord });
+  check(same(clashWord, { ok: false, error: "key in use" }) && allSheets(game) === before,
+    "S3/L8 a word key cannot steal a picture already assigned to 1º-2º");
+
+  const edited = load();
+  const editedKeys = edited.keys();
+  add(edited, { grade: "2", key: editedKeys[2], lock: "1,2" });
+  const editedWord = editedKeys[2].split(" ")[1];
+  edited.sheets.Claves.rows[2][1] = ` ${editedWord.toUpperCase()} `; // valid but not canonical
+  edited.sheets.Claves.rows.push(["", "teacher note", "2026-11"]);
+  before = allSheets(edited);
+  const editedClash = edited.post({ action: "setkey", secret: SECRET, grade: "1", key: editedWord });
+  check(same(editedClash, { ok: false, error: "key in use" }) && allSheets(edited) === before,
+    "S3/L8 setkey in-use refusal does not tidy handwritten Claves or change Ranking");
+
+  const fresh = load();
+  vm.runInContext("Math.random = function () { return 0; }", fresh.context);
+  const firstSet = fresh.post({ action: "setkey", secret: SECRET, grade: "2", key: "🦁" });
+  check(firstSet.ok === true && firstSet.keys[2] === "🦁 león" && PICTURE_KEYS.includes(firstSet.keys[1])
+    && firstSet.keys[1] !== firstSet.keys[2] && sheetKeys(fresh)[1][1] === "🦁 león",
+    "S3/L8 first-request setkey reserves the requested picture before minting the other grade's key");
+}
+
+function pictureAdds() {
+  for (const grade of [1, 2]) {
+    for (const picture of PICTURE_KEYS) {
+      const [emoji, word] = picture.split(" ");
+      for (const key of [emoji, word, picture, `  ${fold(word).toUpperCase().split("").join(" ")} `]) {
+        const game = load();
+        let keys = game.keys();
+        const other = grade === 1 ? 2 : 1;
+        if (keys[other] === picture) {
+          const spare = PICTURE_KEYS.find((p) => p !== picture && p !== keys[grade]);
+          game.post({ action: "setkey", secret: SECRET, grade: String(other), key: spare });
+        }
+        const set = game.post({ action: "setkey", secret: SECRET, grade: String(grade), key: picture });
+        const answer = add(game, { grade: String(grade), key, lock: "0,11", points: "1234" });
+        const row = game.rows()[0] || [];
+        check(set.ok === true && same(answer, expectedAdd(grade, "2026-11", [{ name: "Tigre Veloz", points: 1234 }], expectedMe("Tigre Veloz", 1234, 1, 1)))
+          && game.rows().length === 1 && same(row.slice(1, 7), ["2026-11", grade, "Tigre Veloz", 1234, grade, 4])
+          && validHash(row[7], "0,11") && !JSON.stringify(game.sheets.Ranking.rows).includes("0,11"),
+          `S3/L8 add ${grade}º accepts picture ${JSON.stringify(key)} with a two-index salted lock`);
+      }
+    }
+  }
+  const game = load();
+  const keys = game.keys();
+  const firstWord = keys[1].split(" ")[1];
+  const secondEmoji = keys[2].split(" ")[0];
+  const young = add(game, { grade: "2", key: firstWord, lock: "11,0" });
+  check(same(young, expectedAdd(2, "2026-11", [{ name: "Tigre Veloz", points: 1200, from: 1 }], expectedMe("Tigre Veloz", 1200, 1, 1)))
+    && game.rows()[0][5] === 1 && validHash(game.rows()[0][7], "11,0"),
+    "S3/L7-L8 a 1º picture word enters 2º using the two-index form-grade lock");
+  const older = add(game, { grade: "3", key: firstWord, lock: "11,0,1" });
+  check(same(older, expectedAdd(3, "2026-11", [{ name: "Tigre Veloz", points: 1200, from: 1 }], expectedMe("Tigre Veloz", 1200, 1, 1)))
+    && game.rows()[1][5] === 1 && validHash(game.rows()[1][7], "11,0,1"),
+    "S3/L7-L8 a 1º picture word enters 3º using the three-index form-grade lock");
+  for (const [fields, expected] of [
+    [{ grade: "1", key: secondEmoji, lock: "1,2" }, { ok: false, error: "wrong grade", keyGrade: 2 }],
+    [{ grade: "2", key: keys[3], lock: "1,2" }, { ok: false, error: "wrong grade", keyGrade: 3 }],
+    [{ grade: "3", key: firstWord, lock: "1,2" }, { ok: false, error: "bad lock" }],
+    [{ grade: "2", key: keys[3], lock: "1,2,3" }, { ok: false, error: "bad lock" }],
+    [{ grade: "1", key: "🦁 rana", lock: "1,2" }, { ok: false, error: "bad key" }],
+  ]) {
+    const before = allSheets(game);
+    const answer = add(game, fields);
+    check(same(answer, expected) && allSheets(game) === before,
+      `S3/L7-L8 add refuses ${JSON.stringify(fields)} as ${expected.error} without changing either sheet`);
+  }
+}
+
+function pictureLocks() {
+  for (const grade of [1, 2]) {
+    const game = load();
+    const keys = game.keys();
+    const first = add(game, { grade: String(grade), key: keys[grade], lock: "0,0", points: "100" });
+    const second = add(game, { grade: String(grade), key: keys[grade], animal: "Lobo", lock: "11,11", points: "200" });
+    const rows = game.rows();
+    check(same(first, expectedAdd(grade, "2026-11", [{ name: "Tigre Veloz", points: 100 }], expectedMe("Tigre Veloz", 100, 1, 1)))
+      && same(second, expectedAdd(grade, "2026-11", [{ name: "Lobo Veloz", points: 200 }, { name: "Tigre Veloz", points: 100 }], expectedMe("Lobo Veloz", 200, 1, 2)))
+      && rows.length === 2 && validHash(rows[0][7], "0,0") && validHash(rows[1][7], "11,11") && rows[0][7] !== rows[1][7],
+      `S3/L8 ${grade}º accepts both palette endpoints and independently salts two-index locks`);
+    const before = allSheets(game);
+    for (const lock of ["", "1", "1,2,3", "1,2,3,4", "12,0", "-1,0", "1.5,2", "1,", "1,x", "🍎,⭐", "01,2", "1,02", "00,1", " 1,2", "1,2\n", null, 123]) {
+      const answer = add(game, { grade: String(grade), key: keys[grade], lock });
+      check(same(answer, { ok: false, error: "bad lock" }) && allSheets(game) === before,
+        `S3/L8 ${grade}º rejects malformed lock ${JSON.stringify(lock)} without changing either sheet`);
+    }
+    const taken = add(game, { grade: String(grade), key: keys[grade], lock: "0,1" });
+    check(same(taken, { ok: false, error: "name taken" }) && allSheets(game) === before,
+      `S3/L8 ${grade}º rejects a different two-index lock for a claimed name without writes`);
+    const updated = add(game, { grade: String(grade), key: keys[grade], lock: "0,0", points: "300" });
+    check(same(updated, expectedAdd(grade, "2026-11", [{ name: "Tigre Veloz", points: 300 }, { name: "Lobo Veloz", points: 200 }], expectedMe("Tigre Veloz", 300, 1, 2)))
+      && game.rows().length === 2 && game.rows()[0][7] === rows[0][7],
+      `S3/L8 ${grade}º the matching two-index lock updates the best score and preserves its salt`);
+  }
+  for (const grade of [3, 4, 5, 6]) {
+    const game = load();
+    const key = game.keys()[grade];
+    const before = allSheets(game);
+    const refused = add(game, { grade: String(grade), key, lock: "0,11" });
+    check(same(refused, { ok: false, error: "bad lock" }) && allSheets(game) === before,
+      `S3/L8 ${grade}º refuses a two-index lock without changing either sheet`);
+    const accepted = add(game, { grade: String(grade), key, lock: "0,11,0" });
+    check(same(accepted, expectedAdd(grade, "2026-11", [{ name: "Tigre Veloz", points: 1200 }], expectedMe("Tigre Veloz", 1200, 1, 1)))
+      && validHash(game.rows()[0]?.[7], "0,11,0"), `S3/L8 ${grade}º still accepts a three-index salted lock`);
+  }
+}
+
 lists();
 saveValid();
 rejectInvalid();
@@ -813,6 +1132,7 @@ handEdits();
 oldSheet();
 levelThree();
 levelThreeEveryGrade();
+lockRequiredInPictureGrades();
 lockedBest();
 lockedScopesAndLegacy();
 differentNames();
@@ -820,5 +1140,9 @@ dateCellsAndForgottenLock();
 ownPosition();
 ownPositionOutsideTop();
 lockRejections();
+pictureSheets();
+pictureSetKey();
+pictureAdds();
+pictureLocks();
 console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 process.exit(failCount ? 1 : 0);
