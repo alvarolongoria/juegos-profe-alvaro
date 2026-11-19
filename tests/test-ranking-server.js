@@ -462,15 +462,15 @@ function oldSheet() {
     "S1 old rows without a real grade still show in the top");
 }
 
-// S6: only 3º may also enter after level 3; a level-4 finish always ranks above a level-3 one.
+// S6: 3º may also enter after level 3; a level-4 finish always ranks above a level-3 one.
 function levelThree() {
   const game = load();
   const three = (fields) => add(game, { grade: "3", ...fields });
   check(three({ level: "3", points: "900", animal: "Lince", adjective: "Feliz" }).ok === true
     && game.rows()[0][6] === 3, "S6 a level-3 score is saved in 3º with its level");
-  check(add(game, { grade: "5", level: "3" }).ok === false && add(game, { grade: "2", level: "3" }).ok === false
-    && three({ level: "2" }).ok === false && three({ level: "x" }).ok === false && game.rows().length === 1,
-    "S6 level 3 is refused outside 3º and any other level is refused, saving nothing");
+  check(three({ level: "2" }).ok === false && three({ level: "x" }).ok === false && three({ level: "5" }).ok === false
+    && game.rows().length === 1,
+    "S6 any level other than 3 or 4 is refused, saving nothing");
   const finished = three({ points: "300", animal: "Lobo", adjective: "Leal" });
   check(finished.ok === true && game.rows()[1][6] === 4, "S6 a score without a level counts as a level-4 finish (old pages keep working)");
   three({ level: "3", points: "5000", animal: "Panda", adjective: "Fuerte" });
@@ -484,6 +484,24 @@ function levelThree() {
   game.sheets.Ranking.appendRow([new Date(), "'2026-11", 3, "Zorro Ágil", 100, 3]); // no level cell: written by the old script
   check(JSON.stringify(old.json({ action: "top", grade: "3" }).top[1]) === JSON.stringify({ name: "Zorro Ágil", points: 100 }),
     "S6 an old row without a level counts as level 4");
+}
+
+// ranking-justo S2: every grade, 1º to 6º, may enter after level 3, and level 4 still ranks first.
+function levelThreeEveryGrade() {
+  for (const grade of ["1", "2", "3", "4", "5", "6"]) {
+    const game = load();
+    const early = add(game, { grade, level: "3", points: "5000", animal: "Panda", adjective: "Fuerte" });
+    check(early.ok === true && game.rows().length === 1 && game.rows()[0][6] === 3,
+      `C level 3 is saved in ${grade}º with its level (${JSON.stringify(early)})`);
+    const finished = add(game, { grade, points: "300", animal: "Lobo", adjective: "Leal" });
+    check(finished.ok === true && JSON.stringify(finished.top) === JSON.stringify([
+      { name: "Lobo Leal", points: 300 },
+      { name: "Panda Fuerte", points: 5000, level: 3 },
+    ]), `C in ${grade}º level 4 ranks above level 3 whatever the points (${JSON.stringify(finished.top)})`);
+  }
+  const game = load();
+  check(add(game, { grade: "7", level: "3" }).ok === false && add(game, { grade: "0", level: "3" }).ok === false
+    && game.rows().length === 0, "C level 3 outside 1º-6º is refused, saving nothing");
 }
 
 // S2, S3, S5: a lock belongs to a name only for this grade and month.
@@ -794,6 +812,7 @@ keyRules();
 handEdits();
 oldSheet();
 levelThree();
+levelThreeEveryGrade();
 lockedBest();
 lockedScopesAndLegacy();
 differentNames();

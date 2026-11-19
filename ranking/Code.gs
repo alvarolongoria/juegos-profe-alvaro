@@ -98,7 +98,7 @@ var BLOCKED_KEYS = ["caca", "culo", "pedo", "pene", "pito", "popo", "puta", "put
 var SHEET = "Ranking";
 var HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno", "Nivel", "Candado"];
 // Grades that may also enter the ranking after level 3 (a level-4 finish always ranks above).
-var LEVEL_THREE_GRADES = [3];
+var LEVEL_THREE_GRADES = [1, 2, 3, 4, 5, 6];
 var KEYS_SHEET = "Claves";
 var KEYS_HEADER = ["Curso", "Clave", "Mes"];
 var GRADES = [1, 2, 3, 4, 5, 6];

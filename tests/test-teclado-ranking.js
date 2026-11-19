@@ -105,21 +105,30 @@ async function gameWithClock(handler, { previewHandled = false, touch = false } 
   return game;
 }
 
+// Every grade may save after level 3 (ranking-justo S2): play on to level 4 without saving.
+async function skipLevelThreeRanking(page) {
+  if (!await page.locator("#ranking").count()) return;
+  await page.locator(".overlay .play-btn").click({ force: true });
+  const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
+  if (await warning.count()) await warning.getByRole("button", { name: "Jugar sin guardar" }).click();
+}
+
 async function win(page, grade, checkEarly = false) {
   await chooseGrade(page, grade);
   if (checkEarly) check(await page.locator("#ranking").count() === 0, "S11 no ranking at the start of the game");
   for (let level = 0; level < 4; level++) {
     const result = await finishWithClock(page);
-    if (checkEarly && level < 3) {
+    if (checkEarly && level < 2) {
       check(result.level === String(level) && result.finished && await page.locator("#ranking").count() === 0 && await page.locator(".overlay").count() === 0,
         `S11 no ranking after level ${level + 1}`);
     }
-    if (!result.finished) throw new Error(`Could not finish level ${level + 1}`);
-    if (grade === 3 && level === 2 && await page.locator("#ranking").count()) {
-      await page.locator(".overlay .play-btn").click({ force: true });
-      const warning = page.getByRole("dialog", { name: "¡Todavía no has guardado tu puntuación!" });
-      if (await warning.count()) await warning.getByRole("button", { name: "Jugar sin guardar" }).click();
+    if (checkEarly && level === 2 && await page.evaluate(() => !!window.RANKING_URL)) {
+      check(result.finished && await page.locator("#ranking").count() === 1 && (await page.locator("#ranking").innerText()).includes("Nivel 3 superado"),
+        `ranking-justo S2 ${grade}º is offered the ranking after level 3`);
     }
+    if (!result.finished) throw new Error(`Could not finish level ${level + 1}`);
+    // Every grade may save after level 3 (ranking-justo S2): these tests play on to level 4.
+    if (level === 2) await skipLevelThreeRanking(page);
   }
   // The trophy flight of the last win moves the overlay; click only once it lands.
   await page.waitForFunction(() => !document.querySelector(".trophy-flight"), null, { polling: 100 });
@@ -262,8 +271,8 @@ async function saveAndSafety() {
       && [...params.keys()].sort().join(",") === "action,adjective,animal,grade,key,lock,points",
       `S11/S5 at most one add sends the selected name, score, key and ordered emoji indices (${adds.length} requests)`);
     const rows = ranking.locator("ol li");
-    check(await rows.count() === 3 && await rows.nth(0).textContent() === `Lince Feliz — ${score + 100}`
-      && await rows.nth(1).textContent() === `${animal} ${selectedAdjective} — ${score}`,
+    check(await rows.count() === 3 && await rows.nth(0).textContent() === `🏆 Lince Feliz — ${score + 100}`
+      && await rows.nth(1).textContent() === `🏆 ${animal} ${selectedAdjective} — ${score}`,
       "S11 the returned top is rendered in order with names and points");
     check(await rows.nth(1).evaluate((el) => el.classList.contains("ranking-saved")) && await ranking.locator(".ranking-saved").count() === 1
       && !(await ranking.innerText()).includes("Tu mejor marca:"),
@@ -353,7 +362,7 @@ async function viewWithoutSaving() {
     const view = ranking.getByRole("button", { name: "Ver ranking", exact: true });
     await view.click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 10, null, { polling: 100 });
-    const expected = Array.from({ length: 10 }, (_, i) => `${animals[i]} ${adjectives[i]} — ${1200 - i * 100}`);
+    const expected = Array.from({ length: 10 }, (_, i) => `🏆 ${animals[i]} ${adjectives[i]} — ${1200 - i * 100}`);
     check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(expected)
       && !(await ranking.innerText()).includes("Tu mejor marca:"),
       "S11 Ver ranking shows all ten entries without saving or displaying an unsolicited personal result");
@@ -403,11 +412,11 @@ async function gradeOneAndRepeat() {
     const personal = `Tu mejor marca: ${firstScore + 1450} · Estás en el puesto 17 de 1º`;
     check(adds.length === 1 && adds[0].searchParams.get("grade") === "1" && adds[0].searchParams.get("points") === String(firstScore)
       && await ranking.locator(".ranking-saved").count() === 0 && await ranking.getByText(personal, { exact: true }).isVisible()
-      && JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(top.map((entry) => `${entry.name} — ${entry.points}`)),
+      && JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(top.map((entry) => `🏆 ${entry.name} — ${entry.points}`)),
       "S1 the stored best and 17th position are visible with the top ten even when the pupil is outside it");
     await ranking.getByRole("button", { name: "Ver ranking", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
-    check(await ranking.getByText(personal, { exact: true }).isVisible() && await ranking.locator("ol li").textContent() === "Panda Feliz — 9999",
+    check(await ranking.getByText(personal, { exact: true }).isVisible() && await ranking.locator("ol li").textContent() === "🏆 Panda Feliz — 9999",
       "S1 viewing the top after a save keeps the personal result visible with the refreshed list");
     await page.locator(".overlay .play-btn").click({ force: true });
     const replay = await finishWithClock(page);
@@ -416,6 +425,7 @@ async function gradeOneAndRepeat() {
       for (let level = 1; level < 4; level++) {
         const result = await finishWithClock(page);
         check(result.level === String(level) && result.finished, `S11 replay continues through level ${level + 1}`);
+        if (level === 2) await skipLevelThreeRanking(page);
       }
     }
     ranking = page.locator("#ranking");
@@ -606,7 +616,7 @@ async function keyErrors() {
     await key.fill("sol");
     await save.click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 2, null, { polling: 100 });
-    check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["Panda Feliz (de 1º) — 900", "Lobo Leal — 800"]),
+    check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["🏆 Panda Feliz (de 1º) — 900", "🏆 Lobo Leal — 800"]),
       "S1 an entry from a younger grade shows «(de Nº)» after the name");
     check(adds.length === 3 && await save.isDisabled(), "S2 after the right key the score is saved once and Guardar stays off");
     noExceptions(game, "S2 key errors");
@@ -690,7 +700,7 @@ async function lockPickerAndRetry() {
     await save.click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
     check(adds.length === 3 && adds[2].animal === "Panda" && adds[2].lock === "3,0,3" && await save.isDisabled()
-      && (await ranking.locator("ol li").textContent()).startsWith("Panda Veloz"), "S5 a child can retry with corrected emojis and save once");
+      && (await ranking.locator("ol li").textContent()).startsWith("🏆 Panda Veloz"), "S5 a child can retry with corrected emojis and save once");
     await page.locator(".overlay .play-btn").click({ force: true });
     check(await page.locator("dialog[open]").count() === 0 && await page.evaluate(() => document.body.dataset.level === "0"),
       "S6 saving after Guardar primero removes the warning on replay");
@@ -700,8 +710,8 @@ async function lockPickerAndRetry() {
   }
 }
 
-// S6: in 3º the ranking also opens after level 3; level 4 is still offered, and no other grade gets the early offer.
-async function levelThree() {
+// S6 + ranking-justo S2: in every grade the ranking also opens after level 3, and level 4 is still offered.
+async function levelThree(grade = 3) {
   const adds = [];
   const game = await gameWithClock(async (route) => {
     const url = new URL(route.request().url());
@@ -710,33 +720,33 @@ async function levelThree() {
       const result = response([
         { name: "Lobo Leal", points: 300 },
         { name: "Panda Feliz", points: 900, level: 3 },
-      ], 3);
+      ], grade);
       if (url.searchParams.get("level") === "3") result.me = { name: "Panda Feliz", points: 900, position: 2, total: 2, level: 3 };
       await reply(route, result);
-    } else await reply(route, response([], 3));
+    } else await reply(route, response([], grade));
   });
   try {
     const { page } = game;
-    await chooseGrade(page, 3);
+    await chooseGrade(page, grade);
     for (let level = 0; level < 2; level++) {
       const result = await finishWithClock(page);
-      check(result.finished && await page.locator("#ranking").count() === 0, `S6 no ranking after level ${level + 1} in 3º`);
+      check(result.finished && await page.locator("#ranking").count() === 0, `S6 no ranking after level ${level + 1} in ${grade}º`);
     }
     const third = await finishWithClock(page);
     const ranking = page.locator("#ranking");
     check(third.finished && await ranking.count() === 1 && (await ranking.innerText()).includes("Nivel 3 superado"),
-      "S6 3º is offered the ranking after level 3");
+      `S6 ${grade}º is offered the ranking after level 3`);
     await ranking.locator('select[name="animal"]').selectOption("Panda");
     await ranking.locator('select[name="adjective"]').selectOption("Feliz");
     await fillKey(ranking, "sol");
     await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 2, null, { polling: 100 });
-    check(adds.length === 1 && adds[0].level === "3" && adds[0].grade === "3" && adds[0].key === "sol" && adds[0].lock === "0,1,2",
+    check(adds.length === 1 && adds[0].level === "3" && adds[0].grade === String(grade) && adds[0].key === "sol" && adds[0].lock === "0,1,2",
       `S6 the level-3 save tells the server the level (${JSON.stringify(adds[0])})`);
     check(JSON.stringify(await ranking.locator("ol li").allTextContents()) === JSON.stringify(["🏆 Lobo Leal — 300", "🥇 Panda Feliz — 900"])
-      && await ranking.getByText("Tu mejor marca: 900 · Estás en el puesto 2 de 3º", { exact: true }).isVisible()
+      && await ranking.getByText(`Tu mejor marca: 900 · Estás en el puesto 2 de ${grade}º`, { exact: true }).isVisible()
       && await ranking.locator("ol li").nth(1).evaluate((item) => item.classList.contains("ranking-saved")),
-      "S1/S6 the level-3 personal result uses the exact 3º wording while the list retains its medals and highlight");
+      `S1/S6 the level-3 personal result uses the exact ${grade}º wording while the list retains its medals and highlight`);
     await page.locator(".overlay .play-btn").click({ force: true });
     await page.waitForFunction(() => document.body.dataset.level === "3" && !document.querySelector(".overlay"), null, { polling: 100 });
     check(await page.locator("#ranking").count() === 0 && await page.locator("dialog[open]").count() === 0,
@@ -750,8 +760,8 @@ async function levelThree() {
     await page.waitForFunction((n) => document.querySelectorAll("#ranking ol li").length === n, 2, { polling: 100 });
     check(adds.length === 2 && !("level" in adds[1]), `S6 the level-4 save sends no level, as before (${JSON.stringify(adds[1])})`);
     await page.locator(".overlay .play-btn").click({ force: true });
-    check(await page.evaluate(() => document.body.dataset.level === "0"), "S4 3º starts level 1 after its final ranking, not after the level-3 ranking");
-    noExceptions(game, "S6 level three");
+    check(await page.evaluate(() => document.body.dataset.level === "0"), `S4 ${grade}º starts level 1 after its final ranking, not after the level-3 ranking`);
+    noExceptions(game, `S6 level three in ${grade}º`);
   } finally {
     await game.browser.close();
   }
@@ -1015,7 +1025,7 @@ async function startPreview() {
 (async () => {
   for (const [label, run] of [["lock picker and retry", lockPickerAndRetry], ["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
-    ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree],
+    ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["level three in 1º", () => levelThree(1)], ["level three in 6º", () => levelThree(6)],
     ["S6 unsaved final warning", unsavedFinalWarning], ["S6 unsaved checkpoint touch", unsavedCheckpointTouch], ["S6 unavailable and ordinary play", unavailableAndOrdinaryPlay], ["start preview", startPreview]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }
   }
