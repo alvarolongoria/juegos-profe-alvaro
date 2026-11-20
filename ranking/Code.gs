@@ -13,8 +13,14 @@
 // The six keys change on the first request of each month; the teacher may also
 // edit the tab by hand.
 //
+// «Golpes» (hits): the Ranking tab only keeps each pupil's best, so every saved
+// run also appends one row here. The monthly villain screen adds up those rows.
+// «Metas» (goals): the points each grade must reach this month. The teacher may
+// edit a goal by hand; a blank or impossible goal falls back to the default.
+//
 // Public requests (GET, so a <script> tag can call it too):
 //   ?action=top&grade=5                         -> top 10 of the current month
+//   ?action=villain                             -> monthly villain: goal and hits of the six grades
 //   ?action=add&animal=Tigre&adjective=Veloz&grade=1&points=1200&key=león&lock=3,0
 //   ?action=add&animal=Tigre&adjective=Veloz&grade=5&points=1200&key=sol&lock=3,0,7
 //     lock is two ordered palette indices for form grades 1º-2º, three for
@@ -109,6 +115,14 @@ var LEVEL_THREE_GRADES = [1, 2, 3, 4, 5, 6];
 var KEYS_SHEET = "Claves";
 var KEYS_HEADER = ["Curso", "Clave", "Mes"];
 var GRADES = [1, 2, 3, 4, 5, 6];
+// Every saved run is a hit for the monthly villain (the Ranking tab keeps only the best).
+var GOLPES_SHEET = "Golpes";
+var GOLPES_HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos"];
+// The points each grade must reach this month, editable by the teacher.
+var METAS_SHEET = "Metas";
+var METAS_HEADER = ["Curso", "Meta"];
+var DEFAULT_GOALS = { 1: 30000, 2: 60000, 3: 100000, 4: 120000, 5: 150000, 6: 200000 };
+var HITS_SHOWN = 3;
 var TIME_ZONE = "Europe/Madrid";
 var TOP_SIZE = 10;
 var MAX_POINTS = 100000;
@@ -123,6 +137,7 @@ function doGet(e) {
   var result;
   try {
     if (params.action === "top") result = top(params);
+    else if (params.action === "villain") result = villain();
     else if (params.action === "add") result = add(params);
     else result = { ok: false, error: "unknown action" };
   } catch (error) {
@@ -191,6 +206,10 @@ function sheetNamed(name, header) {
 
 function sheet() {
   return sheetNamed(SHEET, HEADER);
+}
+
+function golpesSheet() {
+  return sheetNamed(GOLPES_SHEET, GOLPES_HEADER);
 }
 
 // The child types the key: spaces (even a missing one before the number), capitals and accents do not matter.
@@ -485,6 +504,76 @@ function top(params) {
   return { ok: true, grade: grade, month: found.month, top: found.top };
 }
 
+// A goal the teacher typed. A blank, non-numeric or non-positive cell means
+// "use the default for this grade"; a number typed as text still counts.
+function goalValue(value, grade) {
+  var text = String(value === undefined || value === null ? "" : value).trim();
+  var number = text === "" ? NaN : Number(text);
+  return isFinite(number) && number > 0 ? number : DEFAULT_GOALS[grade];
+}
+
+// The six goals of the month, creating the «Metas» tab with the default goals
+// the first time. Only a missing row gains a default: an invalid cell keeps the
+// teacher's text untouched and is simply read as the default.
+// Call only while holding the script lock.
+function readGoals() {
+  var tab = sheetNamed(METAS_SHEET, METAS_HEADER);
+  var rows = tab.getDataRange().getValues().slice(1);
+  var goals = {}, seen = {}, missing = [];
+  for (var i = 0; i < rows.length; i++) {
+    var grade = readGrade(rows[i][0]);
+    if (grade === null || seen[grade]) continue;
+    seen[grade] = true;
+    goals[grade] = goalValue(rows[i][1], grade);
+  }
+  for (var n = 0; n < GRADES.length; n++) {
+    if (seen[GRADES[n]]) continue;
+    goals[GRADES[n]] = DEFAULT_GOALS[GRADES[n]];
+    missing.push([GRADES[n], DEFAULT_GOALS[GRADES[n]]]);
+  }
+  if (missing.length) tab.getRange(tab.getLastRow() + 1, 1, missing.length, 2).setValues(missing);
+  return goals;
+}
+
+// A hit's moment. Sheets gives a date cell back as a Date; a hand-typed text
+// cell is parsed, and anything unreadable sinks to the oldest.
+function hitTime(value) {
+  if (value instanceof Date) return value.getTime();
+  var parsed = new Date(value).getTime();
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+// What the whiteboard screen needs: for each grade, its goal, the energy taken
+// this month and the three newest hits. Rows of other months never count.
+// Read-only: it only creates the two tabs with their header (and the default
+// goals) when they do not exist yet.
+function villain() {
+  return withLock(function () {
+    var month = currentMonth();
+    var goals = readGoals();
+    var rows = golpesSheet().getDataRange().getValues().slice(1);
+    var grades = [];
+    for (var n = 0; n < GRADES.length; n++) {
+      var grade = GRADES[n], taken = 0, runs = [];
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        if (monthOf(row[1]) !== month || Number(row[2]) !== grade) continue;
+        var points = Number(row[4]);
+        if (!isFinite(points)) points = 0;
+        taken += points;
+        runs.push({ name: String(row[3] || ""), points: points, time: hitTime(row[0]), order: i });
+      }
+      // Newest first, even after someone sorts the tab by hand.
+      runs.sort(function (a, b) { return b.time - a.time || b.order - a.order; });
+      grades.push({
+        grade: grade, goal: goals[grade], taken: taken,
+        hits: runs.slice(0, HITS_SHOWN).map(function (run) { return { name: run.name, points: run.points }; }),
+      });
+    }
+    return { ok: true, month: month, grades: grades };
+  });
+}
+
 // The salt is unique to a row; neither the emoji indices nor the emojis are stored.
 function lockHash(salt, lock) {
   var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + ":" + lock);
@@ -551,6 +640,9 @@ function add(params) {
         tab.getRange(rowIndex, 1, 1, HEADER.length).setValues([values]);
       }
     }
+    // The Ranking tab keeps only each pupil's best; the villain screen needs
+    // every saved run, so a lower run is logged too. Nothing is logged on refusal.
+    golpesSheet().appendRow([values[0], "'" + month, grade, name, Number(params.points)]);
     // Read the written row and ranking together before another add can change either.
     SpreadsheetApp.flush();
     var found = topOf(grade, rowIndex, month);

@@ -788,19 +788,23 @@ function ownPosition() {
     "S1 a locked row's exact position respects stable ties, level order, month and grade without exposing private fields");
   check(reads.length === 2 && reads.every((read) => read.locked) && reads[1].lastEvent === "flush",
     "S1 the stored row and ordered result are read after flushing while the write lock is held");
-  const before = allSheets(game);
+  const before = snapshot(game), beforeKeys = JSON.stringify(sheetKeys(game));
   const lower = add(game, { grade: "3", key: keys[3], points: "100", lock });
-  check(same(lower, expectedAdd(3, "2026-11", top, expectedMe("Tigre Veloz", 200, 4, 5))) && allSheets(game) === before,
-    "S1 a lower run returns the stored best and its position without changing either sheet");
+  check(same(lower, expectedAdd(3, "2026-11", top, expectedMe("Tigre Veloz", 200, 4, 5))) && snapshot(game) === before
+    && JSON.stringify(sheetKeys(game)) === beforeKeys
+    && same((golpes(game).at(-1) || []).slice(1), ["2026-11", 3, "Tigre Veloz", 100]),
+    "S1 a lower run returns the stored best and its position, keeps both other sheets and logs only a hit");
 
   const third = add(game, { grade: "3", key: keys[3], animal: "Águila", adjective: "Feliz", level: "3", points: "90000", lock: "4,5,6" });
   const topThird = [...top, { name: "Águila Feliz", points: 90000, level: 3 }];
   check(same(third, expectedAdd(3, "2026-11", topThird, expectedMe("Águila Feliz", 90000, 6, 6, 3))),
     "S1 a tied level-3 result follows every level-4 result and includes only its own level");
-  const beforeThird = allSheets(game);
+  const beforeThird = snapshot(game), beforeThirdKeys = JSON.stringify(sheetKeys(game));
   const lowerThird = add(game, { grade: "3", key: keys[3], animal: "Águila", adjective: "Feliz", level: "3", points: "80000", lock: "4,5,6" });
-  check(same(lowerThird, expectedAdd(3, "2026-11", topThird, expectedMe("Águila Feliz", 90000, 6, 6, 3))) && allSheets(game) === beforeThird,
-    "S1 a lower level-3 run keeps its stored level-3 best and position without writes");
+  check(same(lowerThird, expectedAdd(3, "2026-11", topThird, expectedMe("Águila Feliz", 90000, 6, 6, 3))) && snapshot(game) === beforeThird
+    && JSON.stringify(sheetKeys(game)) === beforeThirdKeys
+    && same((golpes(game).at(-1) || []).slice(1), ["2026-11", 3, "Águila Feliz", 80000]),
+    "S1 a lower level-3 run keeps its stored level-3 best and position, rewriting neither sheet but logging a hit");
   const fourth = add(game, { grade: "3", key: keys[3], animal: "Águila", adjective: "Feliz", points: "10", lock: "4,5,6" });
   const topFourth = [...top.slice(0, 4), { name: "Águila Feliz", points: 10 }, top[4]];
   check(same(fourth, expectedAdd(3, "2026-11", topFourth, expectedMe("Águila Feliz", 10, 5, 6))),
@@ -1113,6 +1117,160 @@ function pictureLocks() {
   }
 }
 
+// ranking-justo T7/S4-L13: every saved run is a hit for the monthly villain.
+const golpes = (game) => (game.sheets.Golpes ? game.sheets.Golpes.rows.slice(1) : []);
+const metas = (game) => (game.sheets.Metas ? game.sheets.Metas.rows : []);
+const sheetState = (game) => JSON.stringify(Object.keys(game.sheets).sort()
+  .map((name) => [name, game.sheets[name].rows, game.sheets[name].writes]));
+
+function hitLog() {
+  const game = load();
+  const first = add(game, { grade: "5", points: "1200" });
+  const [hit] = golpes(game) || [];
+  const header = game.sheets.Golpes ? game.sheets.Golpes.rows[0].join("|") : "no tab";
+  check(header === "Fecha|Mes|Curso|Nombre|Puntos",
+    `D a saved run creates the «Golpes» tab with its header (${header})`);
+  check(first.ok === true && golpes(game).length === 1 && (hit || [])[0] instanceof game.context.Date
+    && same((hit || []).slice(1), ["2026-11", 5, "Tigre Veloz", 1200]),
+    `D a saved run appends one hit with date, month, form grade, name and its points (${JSON.stringify((hit || []).slice(1))})`);
+  const improving = add(game, { grade: "5", points: "1500", lock: "1,2,3" });
+  check(improving.ok === true && game.rows().length === 2 && golpes(game).length === 2
+    && same(golpes(game).map((row) => row[4]), [1200, 1500])
+    && same((golpes(game).at(-1) || []).slice(1), ["2026-11", 5, "Tigre Veloz", 1500]),
+    "D an improving save appends its own hit next to the better stored row");
+  const before = snapshot(game);
+  const lower = add(game, { grade: "5", points: "900", lock: "1,2,3" });
+  check(lower.ok === true && snapshot(game) === before && golpes(game).length === 3
+    && same(golpes(game).map((row) => row[4]), [1200, 1500, 900]),
+    "D a run that does not beat the stored best still appends its hit and leaves the ranking row alone");
+  const young = add(game, { grade: "1", points: "777" });
+  check(young.ok === true && same((golpes(game).at(-1) || []).slice(1), ["2026-11", 1, "Tigre Veloz", 777]),
+    "D a 1º-2º save logs its form grade and its points");
+  const guest = load();
+  const keys = guest.keys();
+  add(guest, { grade: "2", key: keys["1"], animal: "Panda", points: "600" });
+  check(guest.rows()[0][5] === 1 && same((golpes(guest)[0] || []).slice(1), ["2026-11", 2, "Panda Veloz", 600]),
+    "D the hit keeps the form grade (2º) even when the class key comes from 1º");
+}
+
+function noHitOnFailure() {
+  const game = load();
+  add(game, { grade: "5", lock: "1,2,3", points: "100" });
+  const cases = [
+    [{ key: "patata" }, "a wrong class key"],
+    [{ grade: "5", key: game.keys()["6"] }, "another grade's key"],
+    [{ animal: "Juan" }, "a name outside the animal list"],
+    [{ points: "12.5" }, "points that are not a whole number"],
+    [{ level: "2" }, "a level other than 3 or 4"],
+    [{ lock: "1,2" }, "a malformed lock"],
+    [{ grade: "7" }, "grade 7"],
+    [{ lock: "9,8,7" }, "a different lock for a claimed name"],
+  ];
+  for (const [fields, label] of cases) {
+    const before = sheetState(game);
+    const answer = add(game, fields);
+    check(answer.ok === false && sheetState(game) === before && golpes(game).length === 1,
+      `D ${label} appends no hit and changes no sheet (${JSON.stringify(answer)})`);
+  }
+  const fresh = load();
+  const refused = add(fresh, { key: "patata" });
+  check(refused.ok === false && fresh.sheets.Golpes === undefined,
+    "D a refused save never creates the «Golpes» tab");
+  const brake = load();
+  let saved = 0;
+  for (let i = 0; i < 31; i++) if (add(brake, {}).ok) saved++;
+  check(saved === 30 && golpes(brake).length === 30,
+    `D the run refused by the per-minute brake logs no hit (${golpes(brake).length})`);
+}
+
+function villainScreen() {
+  const october = load("2026-10-20T10:00:00Z");
+  add(october, { grade: "3", points: "5000" });
+  add(october, { grade: "1", points: "7000" });
+  const game = load("2026-11-14T10:00:00Z", october.sheets);
+  add(game, { grade: "3", points: "1000" });
+  add(game, { grade: "3", points: "2000", lock: "1,2,3" });
+  add(game, { grade: "3", points: "3000", lock: "1,2,3" });
+  add(game, { grade: "3", points: "4000", lock: "1,2,3" });
+  add(game, { grade: "3", points: "1500", lock: "1,2,3" }); // does not beat the stored 4000
+  add(game, { grade: "1", points: "900" });
+  if (game.sheets.Golpes) {
+    game.sheets.Golpes.appendRow([new Date(), "2026-10", 3, "Fantasma Feliz", 99999]); // last month, converted to a date
+    game.sheets.Golpes.appendRow([new Date(), "'2026-09", 3, "Sombra Feliz", 88888]);
+  }
+  const result = game.json({ action: "villain" });
+  const grades = result.grades || [];
+  check(same(Object.keys(result).sort(), ["grades", "month", "ok"]) && result.ok === true && result.month === "2026-11"
+    && grades.map((entry) => entry.grade).join() === "1,2,3,4,5,6",
+    `D villain answers the six grades of the current month in order (${JSON.stringify(grades.map((entry) => entry.grade))})`);
+  check(same(grades.map((entry) => entry.taken), [900, 0, 11500, 0, 0, 0]),
+    `D each grade's energy sums only its own rows of this month (${grades.map((entry) => entry.taken).join(",")})`);
+  check(same((grades[2] || {}).hits, [
+    { name: "Tigre Veloz", points: 1500 }, { name: "Tigre Veloz", points: 4000 }, { name: "Tigre Veloz", points: 3000 },
+  ]), `D villain shows the three newest hits of a grade, newest first (${JSON.stringify((grades[2] || {}).hits)})`);
+  check(grades.length === 6 && grades.every((entry) => Object.keys(entry).sort().join() === "goal,grade,hits,taken"
+    && entry.hits.every((hit) => Object.keys(hit).sort().join() === "name,points"))
+    && !JSON.stringify(result).includes("Fantasma") && !JSON.stringify(result).includes("Sombra"),
+    "D villain shares only grade, goal, taken and the name and points of the newest hits");
+  check(same(grades.map((entry) => entry.goal), [30000, 60000, 100000, 120000, 150000, 200000]),
+    `D villain starts with the agreed default goal of each grade (${grades.map((entry) => entry.goal).join(",")})`);
+}
+
+// The teacher edits one «Metas» cell by hand, if the tab exists.
+const setGoal = (game, grade, value) => {
+  const row = metas(game).find((entry) => Number(entry[0]) === grade);
+  if (row) row[1] = value;
+};
+const goalOf = (game, grade) => ((metas(game).find((entry) => Number(entry[0]) === grade) || [])[1]);
+
+function villainGoals() {
+  const game = load();
+  game.json({ action: "villain" });
+  check((metas(game)[0] || []).join("|") === "Curso|Meta"
+    && same(metas(game).slice(1), [[1, 30000], [2, 60000], [3, 100000], [4, 120000], [5, 150000], [6, 200000]]),
+    `D the first villain read creates the «Metas» tab with the six default goals (${JSON.stringify(metas(game).slice(1))})`);
+  const before = sheetState(game);
+  game.json({ action: "villain" });
+  check(sheetState(game) === before, "D a later villain read writes nothing at all");
+
+  setGoal(game, 4, 45000); // the teacher raises 4º's goal by hand
+  const edited = game.json({ action: "villain" });
+  check(same((edited.grades || []).map((entry) => entry.goal), [30000, 60000, 100000, 45000, 150000, 200000])
+    && goalOf(game, 4) === 45000,
+    "D a goal edited by the teacher in «Metas» is used as written");
+  setGoal(game, 2, "80000"); // a number typed as text still counts
+  check(same((game.json({ action: "villain" }).grades || []).map((entry) => entry.goal), [30000, 80000, 100000, 45000, 150000, 200000]),
+    "D a goal typed as text is read as a number");
+  for (const [value, label] of [["", "an empty cell"], ["mucha", "a cell that is not a number"], ["0", "a goal of zero"], [-500, "a negative goal"], [null, "a blank cell"]]) {
+    setGoal(game, 2, value);
+    const answer = game.json({ action: "villain" });
+    check(((answer.grades || [])[1] || {}).goal === 60000 && same(goalOf(game, 2), value),
+      `D ${label} falls back to 2º's default goal without rewriting the teacher's cell (${JSON.stringify(((answer.grades || [])[1] || {}).goal)})`);
+  }
+
+  const fresh = load();
+  const empty = sheetState(fresh);
+  const answer = fresh.json({ action: "villain" });
+  const afterFirst = sheetState(fresh);
+  fresh.json({ action: "villain" });
+  check(answer.ok === true && afterFirst !== empty && sheetState(fresh) === afterFirst
+    && fresh.sheets.Ranking === undefined && golpes(fresh).length === 0 && metas(fresh).length === 7,
+    "D villain only creates its two tabs, with header and defaults, and never a ranking row");
+}
+
+function villainCallback() {
+  const game = load();
+  const wrapped = game.get({ action: "villain", callback: "capitan_cb2" });
+  check(wrapped.mime === "JAVASCRIPT" && /^capitan_cb2\(\{.*"grades":\[.*\]\}\);$/.test(wrapped.text),
+    `D villain wraps its answer for a JSONP callback (${wrapped.text.slice(0, 40)})`);
+  check(((JSON.parse(wrapped.text.slice("capitan_cb2(".length, -2)).grades) || []).length === 6,
+    "D the wrapped villain answer is the same JSON");
+  const plain = game.get({ action: "villain" });
+  check(plain.mime === "JSON" && JSON.parse(plain.text).ok === true, "D without a callback villain answers plain JSON");
+  const evil = game.get({ action: "villain", callback: "alert(1)//" });
+  check(evil.mime === "JSON" && JSON.parse(evil.text).ok === false, "D an unsafe callback name is refused for villain too");
+}
+
 lists();
 saveValid();
 rejectInvalid();
@@ -1144,5 +1302,10 @@ pictureSheets();
 pictureSetKey();
 pictureAdds();
 pictureLocks();
+hitLog();
+noHitOnFailure();
+villainScreen();
+villainGoals();
+villainCallback();
 console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 process.exit(failCount ? 1 : 0);
