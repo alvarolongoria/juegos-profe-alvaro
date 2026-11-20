@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow, noimageindex">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capitán Silencio · la batalla del mes</title>
+<style>
+  /* Pizarra del Capitán Silencio: la pantalla vive en un lienzo de 1920x1080 que
+     se escala entero al tamaño de la pantalla, así el dibujo nunca se rompe. */
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{
+    background:#0b1526;color:#fff7e4;
+    font-family:"Segoe UI",system-ui,sans-serif;
+    user-select:none;-webkit-user-select:none;
+  }
+  .stage{
+    position:absolute;top:0;left:0;width:1920px;height:1080px;
+    transform-origin:top left;overflow:hidden;
+    background:radial-gradient(ellipse at 46% 84%,#304866,#14213a 72%);
+    display:flex;flex-direction:column;
+  }
+  .stars{position:absolute;inset:0;pointer-events:none;opacity:.8}
+
+  /* ---------- Cabecera ---------- */
+  header.top{position:relative;display:flex;align-items:center;justify-content:space-between;gap:40px;height:150px;padding:0 48px;flex:0 0 auto}
+  .brand{display:flex;align-items:center;gap:20px;min-width:0}
+  .brand svg{width:78px;height:78px;flex:0 0 auto}
+  .eyebrow{margin:0 0 2px;font-size:23px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:#9fe3f0}
+  h1{margin:0;font-size:54px;line-height:1;text-shadow:0 4px #0b1526}
+
+  .controls{display:flex;align-items:center;gap:22px}
+  .chiprow{display:flex;gap:10px}
+  .chip{
+    width:74px;height:74px;padding:0;border:4px solid #24334b;border-radius:18px;
+    background:#b9eff8;color:#142341;font:inherit;font-size:32px;font-weight:800;
+    box-shadow:0 5px #24334b;cursor:pointer;transition:transform .12s,background .12s;
+  }
+  .chip[aria-pressed="true"]{background:#ffcc58;transform:translateY(-4px);box-shadow:0 5px #24334b,0 0 0 6px #ffcc5840}
+  .home-btn{
+    width:56px;height:56px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+    border:4px solid #24334b;border-radius:50%;background:#172943;color:#fff7e4;
+    font-size:26px;text-decoration:none;box-shadow:0 4px #24334b;
+  }
+  .chip:focus-visible,.home-btn:focus-visible{outline:5px solid #fff7e4;outline-offset:4px}
+
+  /* ---------- Escena y marcador ---------- */
+  main{position:relative;display:grid;grid-template-columns:790px 1fr;gap:44px;align-items:center;flex:1 1 auto;padding:0 48px;min-height:0}
+  .scene{position:relative;height:100%;min-height:0}
+  .scene svg{width:100%;height:calc(100% - 62px);overflow:visible}
+  .scene .caption{position:absolute;left:0;bottom:0;margin:0;padding:10px 22px;border:4px solid #24334b;border-radius:16px;background:#172943e8;font-size:26px;font-weight:700}
+  /* Las piezas se caen conforme la barra se llena. */
+  .piece{transition:opacity .45s}
+  .piece.gone{opacity:0}
+  .fragment{opacity:0;transition:opacity .45s}
+  .fragment.show{opacity:.9}
+  .victoria{display:none}
+  body[data-state="victoria"] .batalla{display:none}
+  body[data-state="victoria"] .victoria{display:block}
+
+  .readout{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .who{margin:0;font-size:28px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:#9fe3f0}
+  .lead{margin:0;font-size:44px;font-weight:800;letter-spacing:10px;text-transform:uppercase;color:#fff7e4}
+  .big{margin:0;display:flex;align-items:baseline;gap:20px;color:#ffcc58;font-weight:900;text-shadow:0 6px #0b1526;white-space:nowrap}
+  .big .num{font-size:196px;line-height:.86;letter-spacing:-6px}
+  .big .unit{font-size:46px;letter-spacing:0}
+
+  .bar{position:relative;height:84px;border:6px solid #24334b;border-radius:42px;background:#172943;box-shadow:inset 0 6px 0 #0b1526;overflow:hidden;flex:0 0 auto}
+  .bar .fill{
+    position:absolute;left:0;top:0;bottom:0;width:0;border-radius:36px;
+    background:linear-gradient(90deg,#22c55e,#7ddd8f 46%,#ffcc58);
+    box-shadow:0 0 26px 6px #ffcc5855;transition:width .3s;
+  }
+  body[data-state="victoria"] .bar .fill{width:100% !important;background:linear-gradient(90deg,#22c55e,#ffcc58)}
+  .barlabels{display:flex;align-items:baseline;justify-content:space-between;margin:0;font-size:26px;font-weight:700;color:#cfe9f2;gap:20px}
+  .barlabels b{color:#ffcc58;font-size:32px}
+
+  .win-title{margin:0;font-size:86px;line-height:.96;font-weight:900;text-shadow:0 0 30px #ffcc58,0 6px #0b1526}
+  .win-sub{margin:8px 0 0;font-size:36px;font-weight:800;color:#ffcc58}
+  .visitante{display:flex;align-items:center;gap:14px;margin:0;padding:14px 24px;align-self:flex-start;border:4px solid #24334b;border-radius:18px;background:#22c55e;color:#07230f;font-size:30px;font-weight:800}
+  .visitante svg{width:34px;height:34px;flex:0 0 auto}
+  .placeholder{margin:0;font-size:42px;font-weight:800;line-height:1.2;color:#fff7e4;text-shadow:0 4px #0b1526}
+  [hidden]{display:none !important}
+
+  /* ---------- Pie ---------- */
+  footer{position:relative;height:300px;padding:10px 48px 0;flex:0 0 auto}
+  footer h2{margin:0 0 14px;font-size:28px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#9fe3f0}
+  .hits{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin:0;padding:0;list-style:none}
+  .hits li{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 24px;border:4px solid #24334b;border-radius:20px;background:#fff7e4;color:#24334b;min-width:0}
+  .hits b{font-size:31px;font-weight:800;line-height:1.15;overflow-wrap:anywhere;min-width:0}
+  .hits .minus{font-size:42px;font-weight:900;color:#e0404a;white-space:nowrap}
+  .hits li:first-child{border-color:#ffcc58;box-shadow:0 0 0 5px #ffcc5833}
+  .hits-empty{margin:0;font-size:28px;font-weight:700;color:#cfe9f2}
+  .footline{display:flex;align-items:baseline;justify-content:space-between;gap:30px;margin-top:16px}
+  .status{margin:0;font-size:26px;font-weight:700;color:#cfe9f2}
+  /* Aviso discreto: los datos que ya están en pantalla se quedan como están. */
+  .notice{margin:0;font-size:22px;font-weight:700;color:#ffcc58;opacity:.85}
+  .notice::before{content:"● ";font-size:16px;vertical-align:2px}
+
+  /* Lluvia de palabras de la victoria. */
+  .rain{display:none;position:absolute;inset:0;overflow:hidden;pointer-events:none}
+  body[data-state="victoria"] .rain{display:block}
+  .rain span{position:absolute;top:-90px;padding:8px 20px;border:4px solid #24334b;border-radius:16px;background:#fff7e4;color:#24334b;font-size:32px;font-weight:800;animation:fall 6s linear infinite}
+  .rain span:nth-child(1){left:37%;animation-delay:0s}
+  .rain span:nth-child(2){left:50%;animation-delay:1.4s}
+  .rain span:nth-child(3){left:62%;animation-delay:.7s}
+  .rain span:nth-child(4){left:74%;animation-delay:2.1s}
+  .rain span:nth-child(5){left:87%;animation-delay:1.1s}
+  @keyframes fall{from{transform:translateY(0) rotate(-4deg)}to{transform:translateY(1200px) rotate(6deg)}}
+
+  /* Sin movimiento, las palabras se quedan quietas sobre la nave. */
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none !important;transition:none !important}
+    .rain span{top:auto}
+    .rain span:nth-child(1){left:5%;bottom:58%}
+    .rain span:nth-child(2){left:22%;bottom:50%}
+    .rain span:nth-child(3){left:9%;bottom:42%}
+    .rain span:nth-child(4){left:30%;bottom:38%}
+    .rain span:nth-child(5){left:15%;bottom:64%}
+  }
+</style>
+</head>
+<body data-state="cargando">
+
+<div class="stage" id="stage">
+
+  <svg class="stars" viewBox="0 0 1920 1080" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+    <g fill="#fff7e4">
+      <circle cx="120" cy="180" r="3"/><circle cx="310" cy="90" r="4"/><circle cx="640" cy="220" r="3"/>
+      <circle cx="1500" cy="120" r="4"/><circle cx="1760" cy="300" r="3"/><circle cx="1380" cy="620" r="2.5"/>
+      <circle cx="820" cy="60" r="2.5"/><circle cx="1080" cy="150" r="3"/><circle cx="60" cy="620" r="3"/>
+      <circle cx="1880" cy="700" r="2.5"/><circle cx="960" cy="330" r="2"/>
+    </g>
+  </svg>
+
+  <div class="rain" aria-hidden="true">
+    <span>cuento</span><span>dragón</span><span>luna</span><span>pirata</span><span>abrazo</span>
+  </div>
+
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 78 78" aria-hidden="true" focusable="false">
+        <g stroke="#24334b" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M10 62h58" stroke="#fff7e4" stroke-width="7"/>
+          <path d="M39 62V14" stroke="#c98a52" stroke-width="7"/>
+          <path d="M39 14h30l-8 12 8 12H39z" fill="#e0404a"/>
+          <path d="M28 62v10M50 62v10" stroke="#fff7e4" stroke-width="7"/>
+        </g>
+        <circle cx="54" cy="26" r="7" fill="#fff7e4" stroke="#24334b" stroke-width="3"/>
+        <circle cx="51.5" cy="26" r="2" fill="#142341"/><circle cx="56.5" cy="26" r="2" fill="#142341"/>
+      </svg>
+      <div>
+        <p class="eyebrow" id="month">&nbsp;</p>
+        <h1>Capitán Silencio</h1>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="chiprow" role="group" aria-label="Curso que se ve en la pizarra">
+        <button class="chip" type="button" data-grade="1" aria-pressed="false">1º</button>
+        <button class="chip" type="button" data-grade="2" aria-pressed="false">2º</button>
+        <button class="chip" type="button" data-grade="3" aria-pressed="false">3º</button>
+        <button class="chip" type="button" data-grade="4" aria-pressed="false">4º</button>
+        <button class="chip" type="button" data-grade="5" aria-pressed="false">5º</button>
+        <button class="chip" type="button" data-grade="6" aria-pressed="false">6º</button>
+      </div>
+      <a class="home-btn" href="../index.html" aria-label="Volver al inicio">🏠</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="scene" aria-label="La nave del Capitán Silencio">
+      <svg id="ship" viewBox="0 0 760 540" role="img" aria-labelledby="ship-title">
+        <title id="ship-title">La nave pirata del Capitán Silencio, con la fuerza que le queda</title>
+        <ellipse cx="380" cy="502" rx="190" ry="26" fill="#55cbd1" opacity=".2"/>
+        <circle cx="380" cy="270" r="250" fill="none" stroke="#55cbd1" stroke-width="3" opacity=".18"/>
+
+        <!-- Nave entera: la que se ve mientras hay batalla. -->
+        <g class="batalla">
+          <g fill="#9fe3f0" opacity=".85">
+            <path d="M296 450l22 44 22-44z"/><path d="M358 450l22 52 22-52z"/><path d="M420 450l22 44 22-44z"/>
+          </g>
+          <!-- Jarcia: cuerdas del casco al palo. -->
+          <g class="piece" data-piece="4" stroke="#c98a52" stroke-width="5" fill="none" opacity=".9">
+            <path d="M136 316L380 122M624 316L380 122M246 200h268"/>
+          </g>
+          <g class="piece" data-piece="3" stroke="#24334b" stroke-width="9">
+            <circle cx="246" cy="386" r="27" fill="#ffcc58"/>
+            <circle cx="380" cy="386" r="27" fill="#ffcc58"/>
+            <circle cx="514" cy="386" r="27" fill="#ffcc58"/>
+          </g>
+          <g class="piece" data-piece="2">
+            <g stroke="#24334b" stroke-width="9" stroke-linejoin="round">
+              <path d="M258 176q122-46 244 0l-22 112q-100 34-200 0z" fill="#fff7e4"/>
+            </g>
+            <!-- Calavera con huesos cruzados en la vela. -->
+            <circle cx="380" cy="238" r="42" fill="#142341"/>
+            <g stroke="#fff7e4" stroke-width="9" stroke-linecap="round">
+              <path d="M350 208l60 60M410 208l-60 60"/>
+            </g>
+            <circle cx="380" cy="230" r="23" fill="#fff7e4"/>
+            <circle cx="371" cy="226" r="6" fill="#142341"/><circle cx="389" cy="226" r="6" fill="#142341"/>
+            <path d="M370 242h20" stroke="#142341" stroke-width="5"/>
+          </g>
+          <g class="piece" data-piece="1">
+            <path d="M380 84l102 30-102 32z" fill="#e0404a" stroke="#24334b" stroke-width="9" stroke-linejoin="round"/>
+          </g>
+          <!-- Casco y palo: aguantan hasta el final. -->
+          <g stroke="#24334b" stroke-width="9" stroke-linejoin="round">
+            <path d="M120 318h520l-58 132H178z" fill="#efaa63"/>
+            <path d="M142 352h476" stroke="#c98a52" stroke-width="12"/>
+            <path d="M380 150v168" stroke="#c98a52"/>
+            <path d="M380 150V84" stroke="#c98a52" stroke-width="9"/>
+          </g>
+          <!-- Piezas que se van desprendiendo con cada punto. -->
+          <g class="fragment" data-fragment="1" stroke="#24334b" stroke-width="7" stroke-dasharray="16 12" fill="none">
+            <path d="M640 248l74-30 22 46-70 28z" fill="#efaa63"/>
+          </g>
+          <g class="fragment" data-fragment="2" stroke="#24334b" stroke-width="7" stroke-dasharray="16 12" fill="none">
+            <path d="M146 194l58-20 12 40-52 16z" fill="#fff7e4"/>
+          </g>
+          <path d="M706 166l18-16M118 128l-16-16" stroke="#9fe3f0" stroke-width="6" stroke-linecap="round" opacity=".7"/>
+        </g>
+
+        <!-- Nave vencida: rota, sin velas, y las palabras escapándose. -->
+        <g class="victoria">
+          <g transform="translate(380 452) rotate(-11) translate(-380 -452)">
+            <g stroke="#24334b" stroke-width="9" stroke-linejoin="round">
+              <path d="M126 330h508l-56 128H184z" fill="#9aa7b8"/>
+              <ellipse cx="396" cy="402" rx="56" ry="30" fill="#14213a" stroke="none"/>
+              <circle cx="238" cy="394" r="22" fill="#4a5a75"/>
+              <circle cx="512" cy="394" r="22" fill="#4a5a75"/>
+              <path d="M170 380q54 26 108 4" fill="none" stroke-width="7"/>
+            </g>
+            <path d="M330 330l-14-96" stroke="#8a94a6" stroke-width="10" stroke-linecap="round"/>
+            <path d="M420 336q54-24 96 8" stroke="#8a94a6" stroke-width="10" stroke-linecap="round"/>
+            <path d="M232 340q44-58 120-40 66 16 116-12l-6 44q-64 34 -132 18-58-14-92 14z" fill="#dfe3ea" stroke="#24334b" stroke-width="8" stroke-linejoin="round"/>
+            <path d="M318 236q26-30 8-62" fill="#e9edf3" stroke="#24334b" stroke-width="7"/>
+          </g>
+          <g fill="#9aa7b8" opacity=".42">
+            <circle cx="286" cy="250" r="24"/><circle cx="330" cy="216" r="17"/><circle cx="254" cy="214" r="12"/>
+          </g>
+          <g font-family="Segoe UI,system-ui,sans-serif" font-size="26" font-weight="800" text-anchor="middle" stroke="#24334b" stroke-width="5">
+            <g transform="rotate(-8 560 250)"><rect x="508" y="226" width="112" height="46" rx="11" fill="#fff7e4"/><text x="564" y="258" fill="#24334b" stroke="none">cuento</text></g>
+            <g transform="rotate(6 620 150)"><rect x="580" y="128" width="88" height="46" rx="11" fill="#fff7e4"/><text x="624" y="160" fill="#24334b" stroke="none">luna</text></g>
+            <g transform="rotate(-4 170 120)"><rect x="112" y="98" width="112" height="46" rx="11" fill="#fff7e4"/><text x="168" y="130" fill="#24334b" stroke="none">dragón</text></g>
+          </g>
+          <g fill="#ffcc58">
+            <path d="M660 330l7 15 17 2-12 12 3 17-15-8-15 8 3-17-12-12 17-2z"/>
+            <path d="M96 300l5 11 12 2-9 9 2 12-10-6-11 6 3-12-9-9 12-2z"/>
+          </g>
+        </g>
+      </svg>
+      <p class="caption batalla" id="caption-battle">Su nave pierde fuerza con cada punto.</p>
+      <p class="caption victoria" id="caption-victory">¡Nave vencida!</p>
+    </section>
+
+    <section class="readout" aria-labelledby="who">
+      <p class="who" id="who">1º de Primaria</p>
+
+      <div id="battle-block">
+        <p class="lead">Faltan</p>
+        <p class="big"><span class="num" id="faltan-num">0</span><span class="unit">puntos</span></p>
+      </div>
+
+      <div id="victory-block" hidden>
+        <p class="win-title">¡Las palabras vuelven a llover sobre el cole!</p>
+        <p class="win-sub" id="win-sub"></p>
+      </div>
+
+      <div class="bar" id="bar" role="img" aria-label="Puntos del mes">
+        <div class="fill" id="bar-fill"></div>
+      </div>
+      <p class="barlabels" id="bar-labels">
+        <span><b id="taken-num">0</b> puntos ya quitados</span>
+        <span><span id="percent">0%</span> · meta <b id="goal-num">0</b></span>
+      </p>
+
+      <p class="visitante" id="win-chip" hidden>
+        <svg viewBox="0 0 34 34" aria-hidden="true" focusable="false"><circle cx="17" cy="17" r="15" fill="none" stroke="#07230f" stroke-width="4"/><path d="M10 18l5 5 10-11" fill="none" stroke="#07230f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span id="win-chip-text">Barra llena hasta el mes que viene</span>
+      </p>
+
+      <p class="placeholder" id="placeholder" hidden></p>
+    </section>
+  </main>
+
+  <footer>
+    <h2>Los últimos puntos que le quitamos</h2>
+    <ul class="hits" id="hits"></ul>
+    <p class="hits-empty" id="hits-empty" hidden>Todavía nadie ha golpeado a Capitán Silencio este mes.</p>
+    <div class="footline">
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <p class="notice" id="notice" hidden>Sin conexión, reintentando…</p>
+    </div>
+  </footer>
+</div>
+
+<script src="../assets/ranking-config.js"></script>
+<script>
+  (() => {
+    "use strict";
+
+    // ---------- La pizarra se escala entera: el dibujo nunca se rompe ----------
+    const stage = document.getElementById("stage");
+    function fitStage() {
+      const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+      const left = (window.innerWidth - 1920 * scale) / 2;
+      const top = (window.innerHeight - 1080 * scale) / 2;
+      stage.style.transform = `translate(${left}px, ${top}px) scale(${scale})`;
+    }
+    window.addEventListener("resize", fitStage);
+    fitStage();
+
+    // ---------- Fechas reales: mes y días que quedan ----------
+    // Se recalculan en cada lectura, por si la pizarra se queda encendida al cambiar de mes.
+    const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+      "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+    function paintCalendar() {
+      const today = new Date();
+      const monthName = MONTHS[today.getMonth()];
+      const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+      const daysLeft = lastDay - today.getDate();
+      const daysText = daysLeft === 0 ? "último día" : daysLeft === 1 ? "queda 1 día" : `quedan ${daysLeft} días`;
+      document.getElementById("month").textContent = `${monthName} · ${daysText}`;
+      document.getElementById("caption-victory").textContent = `¡Nave vencida hasta el ${lastDay} de ${monthName}!`;
+      document.getElementById("win-chip-text").textContent = `Barra llena hasta el ${lastDay} de ${monthName}`;
+    }
+    paintCalendar();
+
+    const GRADES = [1, 2, 3, 4, 5, 6];
+    const POLL_MS = 30000;
+    const GRADE_KEY = "capitan-curso";
+    const number = new Intl.NumberFormat("es-ES");
+    const format = (value) => number.format(Math.round(value));
+
+    // ---------- Elementos ----------
+    const chips = [...document.querySelectorAll(".chip")];
+    const who = document.getElementById("who");
+    const battleBlock = document.getElementById("battle-block");
+    const victoryBlock = document.getElementById("victory-block");
+    const faltanNum = document.getElementById("faltan-num");
+    const winSub = document.getElementById("win-sub");
+    const bar = document.getElementById("bar");
+    const barFill = document.getElementById("bar-fill");
+    const barLabels = document.getElementById("bar-labels");
+    const takenNum = document.getElementById("taken-num");
+    const percentText = document.getElementById("percent");
+    const goalNum = document.getElementById("goal-num");
+    const winChip = document.getElementById("win-chip");
+    const placeholder = document.getElementById("placeholder");
+    const hitsList = document.getElementById("hits");
+    const hitsEmpty = document.getElementById("hits-empty");
+    const status = document.getElementById("status");
+    const notice = document.getElementById("notice");
+    const ship = document.getElementById("ship");
+
+    // Piezas de la nave, en el orden en que se caen, y el punto de la barra que las rompe.
+    const PIECES = [{ piece: 1, at: 0.2 }, { piece: 2, at: 0.45 }, { piece: 3, at: 0.7 }, { piece: 4, at: 0.9 }];
+    const FRAGMENT_STEP = 0.25;
+
+    // ---------- Curso elegido: se recuerda al recargar ----------
+    function readGrade() {
+      const fromUrl = new URLSearchParams(window.location.search).get("curso");
+      if (/^[1-6]$/.test(String(fromUrl))) return Number(fromUrl);
+      try {
+        const stored = localStorage.getItem(GRADE_KEY);
+        if (/^[1-6]$/.test(String(stored))) return Number(stored);
+      } catch {}
+      return GRADES[0];
+    }
+
+    function remember(grade) {
+      try { localStorage.setItem(GRADE_KEY, String(grade)); } catch {}
+      // Una página abierta como archivo local no siempre deja tocar la dirección.
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set("curso", String(grade));
+        history.replaceState(null, "", url.toString());
+      } catch {}
+    }
+
+    let grade = readGrade();
+    // La última respuesta buena: si una petición falla, la pantalla no cambia.
+    let payload = null;
+    let loading = false;
+
+    // ---------- Pintar un curso ----------
+    // El servidor decide la meta y los golpes; aquí solo se muestra lo que llega.
+    function entryOf(data, wanted) {
+      const list = data && Array.isArray(data.grades) ? data.grades : [];
+      const entry = list.find((item) => item && Number(item.grade) === wanted);
+      if (!entry) return null;
+      const goal = Math.max(0, Math.round(Number(entry.goal) || 0));
+      const taken = Math.max(0, Math.round(Number(entry.taken) || 0));
+      // Los nombres llegan del servidor: se usan siempre como texto, nunca como HTML.
+      const hits = (Array.isArray(entry.hits) ? entry.hits : [])
+        .filter((hit) => hit && typeof hit.name === "string" && hit.name.trim())
+        .slice(0, 3)
+        .map((hit) => ({ name: hit.name, points: Math.max(0, Math.round(Number(hit.points) || 0)) }));
+      return { goal, taken, hits };
+    }
+
+    function setGrade(next) {
+      grade = next;
+      for (const chip of chips) chip.setAttribute("aria-pressed", String(Number(chip.dataset.grade) === grade));
+    }
+
+    function paintHits(hits) {
+      hitsList.replaceChildren();
+      for (const hit of hits) {
+        const item = document.createElement("li");
+        const name = document.createElement("b");
+        name.textContent = hit.name;
+        const points = document.createElement("span");
+        points.className = "minus";
+        points.textContent = `−${format(hit.points)}`;
+        item.append(name, points);
+        hitsList.appendChild(item);
+      }
+      hitsEmpty.hidden = hits.length > 0;
+    }
+
+    function paintPieces(ratio) {
+      for (const { piece, at } of PIECES) {
+        const found = ship.querySelector(`.piece[data-piece="${piece}"]`);
+        if (found) found.classList.toggle("gone", ratio >= at);
+      }
+      ship.querySelectorAll(".fragment").forEach((fragment, index) => {
+        fragment.classList.toggle("show", ratio >= (index + 1) * FRAGMENT_STEP);
+      });
+    }
+
+    function setState(state) {
+      document.body.dataset.state = state;
+      const waiting = state === "cargando" || state === "sin-datos";
+      battleBlock.hidden = state !== "batalla";
+      victoryBlock.hidden = state !== "victoria";
+      winChip.hidden = state !== "victoria";
+      bar.hidden = waiting;
+      barLabels.hidden = waiting;
+      hitsList.hidden = waiting;
+      placeholder.hidden = !waiting;
+      if (waiting) hitsEmpty.hidden = true;
+    }
+
+    function paint() {
+      who.textContent = `${grade}º de Primaria`;
+      const entry = payload ? entryOf(payload, grade) : null;
+      if (!entry || entry.goal <= 0) {
+        setState("sin-datos");
+        placeholder.textContent = `Todavía no hay batalla para ${grade}º este mes.`;
+        status.textContent = "";
+        return;
+      }
+      const { goal, taken, hits } = entry;
+      const ratio = Math.min(1, taken / goal);
+      const percent = Math.round(ratio * 1000) / 10;
+      const won = taken >= goal;
+      setState(won ? "victoria" : "batalla");
+
+      const missing = Math.max(0, goal - taken);
+      const missingText = format(missing);
+      faltanNum.textContent = missingText;
+      // Un número muy largo se hace un poco más pequeño para no salirse.
+      faltanNum.style.fontSize = missingText.length > 8 ? "124px" : missingText.length > 6 ? "156px" : "196px";
+      winSub.textContent = `${grade}º ha quitado ${format(taken)} puntos.`;
+      takenNum.textContent = format(taken);
+      goalNum.textContent = format(goal);
+      percentText.textContent = `${Math.round(ratio * 100)}%`;
+      barFill.style.width = won ? "100%" : `${percent.toFixed(1)}%`;
+      bar.setAttribute("aria-label", `Puntos del mes de ${grade}º: ${format(taken)} de una meta de ${format(goal)}, el ${Math.round(ratio * 100)} por ciento`);
+      paintPieces(ratio);
+      paintHits(hits);
+      status.textContent = won
+        ? `${grade}º ha vencido al Capitán Silencio. ¡Las palabras vuelven a llover sobre el cole!`
+        : `Viendo la batalla de ${grade}º.`;
+    }
+
+    function showPlaceholder(text) {
+      setState("sin-datos");
+      placeholder.textContent = text;
+      status.textContent = "";
+    }
+
+    function showLoading() {
+      setState("cargando");
+      placeholder.textContent = "Cargando la batalla…";
+      status.textContent = "Cargando la batalla…";
+    }
+
+    // ---------- Datos en directo ----------
+    function villainUrl() {
+      const base = typeof window.RANKING_URL === "string" ? window.RANKING_URL : "";
+      if (!base) return null;
+      const url = new URL(base, window.location.href);
+      url.searchParams.set("action", "villain");
+      return url.toString();
+    }
+
+    async function load() {
+      const url = villainUrl();
+      if (!url) {
+        if (!payload) showPlaceholder("La batalla del Capitán Silencio está apagada. Avisa a tu profe.");
+        return;
+      }
+      if (loading) return;
+      loading = true;
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!response.ok) throw new Error("villain request failed");
+        const result = await response.json();
+        if (!result || result.ok !== true || !Array.isArray(result.grades)) throw new Error("villain response failed");
+        payload = result;
+        notice.hidden = true;
+        paintCalendar();
+        paint();
+      } catch {
+        if (payload) {
+          // Ya hay datos buenos en pantalla: se quedan y solo aparece un aviso pequeño.
+          notice.hidden = false;
+        } else {
+          showPlaceholder("No podemos ver la batalla ahora mismo. Volvemos a intentarlo en un momento.");
+        }
+      } finally {
+        loading = false;
+      }
+    }
+
+    for (const chip of chips) {
+      chip.addEventListener("click", () => {
+        setGrade(Number(chip.dataset.grade));
+        remember(grade);
+        if (payload) paint();
+        else load();
+      });
+    }
+
+    setGrade(grade);
+    showLoading();
+    load();
+    setInterval(load, POLL_MS);
+  })();
+</script>
+</body>
+</html>
