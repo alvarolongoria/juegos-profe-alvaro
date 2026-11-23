@@ -311,6 +311,9 @@
       // it ends; while it lasts no new ship arrives.
       let shower = null, showerDone = false;
       let stats = null;
+      // L15: the id of the run being played. Every start or restart gets a new one, so
+      // the monthly villain can count each run once («Partida» column of «Golpes»).
+      let runId = "";
       let lastFrame = 0;
 
       // 1º-2º accept capitals for lowercase text; 3º and up must match exactly.
@@ -904,6 +907,7 @@
         destroyed = 0;
         if (resetRun || !stats) {
           hearts = HEARTS;
+          runId = newRunId();
           stats = { keys: 0, correct: 0, streak: 0, best: 0, score: 0, destroyed: 0, peak: 0, start: performance.now(), lastPublished: performance.now() };
         }
         locked = null;
@@ -942,6 +946,8 @@
         playing = false;
         updateTypingHint();
         for (const ship of [...alive]) removeShip(ship);
+        // L15: a lost run also feeds the class villain, whatever the level.
+        sendHit(grade, stats.score, runId);
         await Juegos.overlay("💔", `¡Inténtalo otra vez!\n${summary()}`);
         startLevel(true);
       }
@@ -984,6 +990,37 @@
       const RANKING_LEVEL_THREE_GRADES = [1, 2, 3, 4, 5, 6];
       // A known server failure must never make the warning an obstacle to play.
       let rankingAvailable = true;
+
+      // L15: the random id of one run, new on every start and restart. Lowercase letters
+      // and digits only, so the server can check it with ^[a-z0-9]{8,32}$.
+      function newRunId() {
+        const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+        const bytes = new Uint8Array(16);
+        if (window.crypto && typeof window.crypto.getRandomValues === "function") window.crypto.getRandomValues(bytes);
+        // An old browser without crypto still gets an id: it only has to be unique enough.
+        else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+        let id = "";
+        for (const byte of bytes) id += alphabet[byte % alphabet.length];
+        return id;
+      }
+
+      // L15: a run that ends feeds the classroom villain of the whiteboard, also when
+      // the child never enters the ranking. Nobody is asked anything and nothing is
+      // shown: a slow or broken server can never delay or change the game.
+      function sendHit(resultGrade, points, run) {
+        // The server only takes whole points between 1 and its maximum.
+        const total = Math.round(points);
+        if (!window.RANKING_URL || !run || total <= 0) return;
+        try {
+          const url = new URL(window.RANKING_URL, window.location.href);
+          url.searchParams.set("action", "hit");
+          url.searchParams.set("grade", resultGrade);
+          url.searchParams.set("points", total);
+          url.searchParams.set("run", run);
+          // The answer is not used, so a failure is only a lost hit.
+          fetch(url.toString()).catch(() => {});
+        } catch { /* the villain is an extra: it never breaks a game */ }
+      }
 
       // Names come from the server: the result is only ever used as text.
       function rankingLabel(entry, resultGrade) {
@@ -1293,7 +1330,7 @@
           const name = `${animal.value} ${adjective.value}`;
           message.textContent = "Guardando…";
           try {
-            const result = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: keyValue, lock: chosen.join(","), ...(resultLevel === 3 ? { level: 3 } : {}) });
+            const result = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: keyValue, lock: chosen.join(","), ...(runId ? { run: runId } : {}), ...(resultLevel === 3 ? { level: 3 } : {}) });
             rankingAvailable = true;
             // An older server sends no "me": then nothing personal is shown, as before.
             const me = result.me;
@@ -1348,6 +1385,8 @@
           playing = false;
           updateTypingHint();
           for (const ship of [...alive]) removeShip(ship);
+          // L15: the finished run is the run's best moment, so it is sent again.
+          sendHit(grade, stats.score, runId);
           const overlay = Juegos.overlay("🏆", summary());
           if (window.RANKING_URL) showRanking(document.querySelector(".overlay"), grade, stats.score, window.RANKING_URL);
           await overlay;
@@ -1358,6 +1397,8 @@
           playing = false;
           updateTypingHint();
           for (const ship of [...alive]) removeShip(ship);
+          // L15: the offer to save is also a moment of the run for the villain.
+          sendHit(grade, stats.score, runId);
           const overlay = Juegos.overlay("🥇", `¡Nivel 3 superado!\n${summary()}`);
           showRanking(document.querySelector(".overlay"), grade, stats.score, window.RANKING_URL, 3);
           await overlay;

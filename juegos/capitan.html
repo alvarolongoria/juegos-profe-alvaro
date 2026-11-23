@@ -395,10 +395,11 @@
       const goal = Math.max(0, Math.round(Number(entry.goal) || 0));
       const taken = Math.max(0, Math.round(Number(entry.taken) || 0));
       // Los nombres llegan del servidor: se usan siempre como texto, nunca como HTML.
+      // L15: un golpe anónimo llega con el nombre vacío y cuenta igual que los demás.
       const hits = (Array.isArray(entry.hits) ? entry.hits : [])
-        .filter((hit) => hit && typeof hit.name === "string" && hit.name.trim())
+        .filter((hit) => hit && typeof hit.name === "string")
         .slice(0, 3)
-        .map((hit) => ({ name: hit.name, points: Math.max(0, Math.round(Number(hit.points) || 0)) }));
+        .map((hit) => ({ name: hit.name.trim(), points: Math.max(0, Math.round(Number(hit.points) || 0)) }));
       return { goal, taken, hits };
     }
 
@@ -412,7 +413,8 @@
       for (const hit of hits) {
         const item = document.createElement("li");
         const name = document.createElement("b");
-        name.textContent = hit.name;
+        // Una partida que no se registró en el ranking no tiene nombre: se dice de dónde viene.
+        name.textContent = hit.name || `Un piloto de ${grade}º`;
         const points = document.createElement("span");
         points.className = "minus";
         points.textContent = `−${format(hit.points)}`;

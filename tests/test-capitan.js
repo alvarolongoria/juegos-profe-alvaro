@@ -164,6 +164,30 @@ async function latestHits() {
   }
 }
 
+// ranking-justo L15: a run that never saved a name still counts, and the screen says so.
+async function anonymousHits() {
+  const mixed = [
+    { name: "", points: 480 },
+    { name: "Panda Elegante", points: 1450 },
+    { name: null, points: 70 },
+  ];
+  const game = await open({ query: "?curso=3", handler: (route) => reply(route, all({ 3: { taken: 1930, hits: mixed } })) });
+  const { page } = game;
+  try {
+    await waitReady(page);
+    const names = await page.locator("#hits li b").allTextContents();
+    check(names.length === 2 && names[0] === "Un piloto de 3º" && names[1] === "Panda Elegante",
+      `L15 an anonymous hit reads «Un piloto de 3º» and a named hit keeps its name (${names.join(" · ")})`);
+    const points = await page.locator("#hits li .minus").allTextContents();
+    check(points[0] === `−${await number(page, 480)}` && points[1] === `−${await number(page, 1450)}`,
+      `L15 the anonymous pilot carries the points it took (${points.join(" · ")})`);
+    check(!(await page.locator("#hits-empty").isVisible()), "L15 the empty message stays hidden while an anonymous hit is listed");
+    noExceptions(game, "L15 anonymous hits");
+  } finally {
+    await game.browser.close();
+  }
+}
+
 // Reaching the goal wins the month: full bar and the words rain again.
 async function victoryState() {
   const game = await open({ query: "?curso=3", handler: (route) => reply(route, all({ 3: { goal: 100000, taken: 105000, hits: HITS } })) });
@@ -292,6 +316,7 @@ async function preselect() {
     ["grade picker", gradePicker],
     ["faltan and bar", faltanAndBar],
     ["latest hits", latestHits],
+    ["anonymous hits", anonymousHits],
     ["victory state", victoryState],
     ["polling", polling],
     ["offline notice", offlineNotice],

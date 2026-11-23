@@ -69,8 +69,11 @@ async function finishWithClock(page) {
 
 // The ranking preview after choosing the grade asks for the top once. Unless a test is about
 // that screen, an empty answer is given here so the test's own handler only sees its own traffic.
-async function gameWithClock(handler, { previewHandled = false, touch = false } = {}) {
+// The villain hits (L15) are recorded in game.hitCalls by the same route, so a test that counts
+// the top/add traffic keeps counting exactly what it always counted.
+async function gameWithClock(handler, { previewHandled = false, touch = false, hitFails = false } = {}) {
   const game = await openGame("juegos/teclado.html");
+  game.hitCalls = [];
   let { page } = game;
   if (touch) {
     const url = page.url();
@@ -87,10 +90,17 @@ async function gameWithClock(handler, { previewHandled = false, touch = false } 
   page.setDefaultTimeout(5000);
   if (!touch) await page.setViewportSize({ width: 1024, height: 600 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  if (handler) {
+  if (handler || hitFails) {
     await page.addInitScript(() => { window.RANKING_URL = "https://ranking.test/exec"; });
     let previewed = previewHandled;
     await page.route("https://ranking.test/**", (route) => {
+      const url = new URL(route.request().url());
+      // ranking-justo L15: every run also feeds the class villain. It is fire-and-forget,
+      // so these calls are answered here unless the test asks for a failing one.
+      if (url.searchParams.get("action") === "hit") {
+        game.hitCalls.push(url);
+        return hitFails ? route.abort() : reply(route, { ok: true });
+      }
       if (!previewed) {
         previewed = true;
         return route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify({ ok: true, grade: 1, month: "2026-11", top: [] }) });
@@ -214,9 +224,11 @@ async function saveAndSafety() {
     check(await ranking.locator("input, textarea, [contenteditable=true]").count() === 1 && await keyField.count() === 1
       && await keyField.getAttribute("name") === "key" && await keyField.getAttribute("autocomplete") === "off",
       "S2 the only free-text field is the class key (the name still comes from the two lists)");
-    check(requests.length === 0 && game.external.length === 1 && game.external[0].includes("action=top") && !game.external[0].includes("key=")
+    check(requests.length === 0 && game.external.filter((url) => !url.includes("action=hit")).length === 1
+      && game.external.filter((url) => !url.includes("action=hit"))[0].includes("action=top")
+      && !game.external.some((url) => url.includes("key="))
       && !(await ranking.innerText()).includes("Tu mejor marca:"),
-      "S11 before a button is used the win screen asks nothing more than the start preview's read-only top or shows a personal result");
+      "S11 before a button is used the win screen asks nothing more than the start preview's read-only top (plus the villain hits) or shows a personal result");
     await page.keyboard.press("Tab");
     await page.waitForTimeout(700);
     check(await ranking.locator('select[name="animal"]').evaluate((el) => document.activeElement === el),
@@ -278,8 +290,8 @@ async function saveAndSafety() {
     const params = adds[0]?.url.searchParams;
     check(adds.length === 1 && adds[0].method === "GET" && params.get("animal") === animal && params.get("adjective") === selectedAdjective
       && params.get("grade") === "5" && params.get("points") === String(score) && params.get("key") === "sol" && params.get("lock") === "0,7,3"
-      && [...params.keys()].sort().join(",") === "action,adjective,animal,grade,key,lock,points",
-      `S11/S5 at most one add sends the selected name, score, key and ordered emoji indices (${adds.length} requests)`);
+      && [...params.keys()].sort().join(",") === "action,adjective,animal,grade,key,lock,points,run",
+      `S11/S5 at most one add sends the selected name, score, key, ordered emoji indices and its run (${adds.length} requests)`);
     const rows = ranking.locator("ol li");
     check(await rows.count() === 3 && await rows.nth(0).textContent() === `🏆 Lince Feliz — ${score + 100}`
       && await rows.nth(1).textContent() === `🏆 ${animal} ${selectedAdjective} — ${score}`,
@@ -553,7 +565,7 @@ async function pictureKeyAndLock(grade) {
     await page.waitForFunction((text) => document.querySelector('#ranking [role="status"]')?.textContent === text, badPicture, { polling: 100 });
     check(adds.length === 1 && adds[0].method === "GET" && adds[0].params.key === "león" && adds[0].params.lock === "0,1"
       && adds[0].params.grade === String(grade) && adds[0].params.points === String(score)
-      && Object.keys(adds[0].params).sort().join(",") === "action,adjective,animal,grade,key,lock,points"
+      && Object.keys(adds[0].params).sort().join(",") === "action,adjective,animal,grade,key,lock,points,run"
       && await save.isEnabled() && await buttons.first().getAttribute("aria-pressed") === "true"
       && (await selection.innerText()).includes("🍎 ⭐ (2/2)"),
       `S3/L8 ${grade}º sends the accented picture word and two indices; a bad picture keeps both choices for retry`);
@@ -1220,12 +1232,186 @@ async function startPreview() {
   }
 }
 
+// ---------- ranking-justo L15: every run feeds the class villain ----------
+const RUN_SHAPE = /^[a-z0-9]{8,32}$/;
+const hitOf = (game, index) => game.hitCalls[index].searchParams;
+// The villain hit is fire-and-forget, so its request arrives on its own time.
+async function expectHits(game, count) {
+  for (let i = 0; i < 60 && game.hitCalls.length < count; i++) await game.page.waitForTimeout(50);
+  return game.hitCalls.length;
+}
+// Destroy one ship with the keyboard, so the run has a real score.
+async function scoreOnce(page) {
+  for (let i = 0; i < 200; i++) {
+    const text = await page.evaluate((i) => {
+      window.randomValue = ((i * 37) % 99 + 0.5) / 100;
+      window.advanceFrames(50);
+      return document.querySelector(".ship")?.dataset.text || "";
+    }, i);
+    if (!text) continue;
+    await page.keyboard.insertText(text);
+    if (await pointsOnScreen(page) > 0) return pointsOnScreen(page);
+  }
+  throw new Error("The run never scored");
+}
+// 6º loses a heart every three wrong keys: nine of them end the run where it is.
+async function loseRun(page) {
+  for (let i = 0; i < 40; i++) {
+    if (await page.evaluate(() => { window.advanceFrames(50); return !!document.querySelector(".ship"); })) break;
+  }
+  await page.keyboard.insertText("#########");
+  await page.waitForFunction(() => (document.querySelector(".overlay .overlay-text")?.textContent || "").includes("Inténtalo otra vez"), null, { polling: 50 });
+}
+
+// L15: a lost run also feeds the villain, at level 1 and at level 2, with its own run id.
+async function villainAtGameOver() {
+  const game = await gameWithClock(async (route) => reply(route, response([], 6)));
+  try {
+    const { page } = game;
+    await chooseGrade(page, 6);
+    const firstScore = await scoreOnce(page);
+    await loseRun(page);
+    check(await expectHits(game, 1) === 1, "L15 a run lost at level 1 sends one villain hit");
+    const first = hitOf(game, 0);
+    check(first.get("action") === "hit" && first.get("grade") === "6" && first.get("points") === String(firstScore)
+      && RUN_SHAPE.test(String(first.get("run"))),
+      `L15 the level-1 hit carries the form grade, this run's points and a valid run id (${game.hitCalls[0]})`);
+    const firstRun = first.get("run");
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.evaluate(() => document.body.dataset.level === "0"), "the lost run restarts at level 1");
+    const finished = await finishWithClock(page);
+    check(finished.finished && await page.evaluate(() => document.body.dataset.level === "1"), "the restarted run reaches level 2");
+    await page.waitForTimeout(400);
+    check(game.hitCalls.length === 1, "L15 finishing level 1 sends no villain hit");
+    await scoreOnce(page);
+    await loseRun(page);
+    const secondScore = await pointsOnScreen(page);
+    check(await expectHits(game, 2) === 2, "L15 a run lost at level 2 also sends its villain hit");
+    const second = hitOf(game, 1);
+    check(secondScore > 0 && second.get("grade") === "6" && second.get("points") === String(secondScore)
+      && RUN_SHAPE.test(String(second.get("run"))) && second.get("run") !== firstRun,
+      `L15 a restart gets a different run id, still valid (${firstRun} -> ${second.get("run")})`);
+    noExceptions(game, "L15 hits at game over");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+// L15: a run that ends with zero points tells the villain nothing.
+async function noHitWithoutPoints() {
+  const game = await gameWithClock(async (route) => reply(route, response([], 6)));
+  try {
+    const { page } = game;
+    await chooseGrade(page, 6);
+    check(await pointsOnScreen(page) === 0, "the run starts with zero points");
+    await loseRun(page);
+    await page.waitForTimeout(600);
+    check(game.hitCalls.length === 0 && await page.locator("#ranking").count() === 0,
+      "L15 a run that ends with zero points sends no villain hit and shows nothing");
+    noExceptions(game, "L15 zero points");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+// L15: no ranking URL, no villain either.
+async function noHitWithoutUrl() {
+  const game = await gameWithClock();
+  try {
+    const { page } = game;
+    await chooseGrade(page, 6);
+    await scoreOnce(page);
+    await loseRun(page);
+    await page.waitForTimeout(600);
+    check(game.external.length === 0, `L15 an empty RANKING_URL sends no villain hit (${game.external.join(", ")})`);
+    noExceptions(game, "L15 no ranking url");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+// L15: the villain is an extra, so a broken server is never a message to the pupil.
+async function silentHitFailure() {
+  const game = await gameWithClock(async (route) => reply(route, response([], 6)), { hitFails: true });
+  try {
+    const { page } = game;
+    await chooseGrade(page, 6);
+    const score = await scoreOnce(page);
+    await loseRun(page);
+    check(await expectHits(game, 1) === 1, "the run still asks the villain when that request fails");
+    const visible = await page.locator("body").innerText();
+    check(/Inténtalo otra vez/.test(visible) && visible.includes(`Puntos: ${score}`)
+      && !/ranking|villano|Sin conexión|No se pudo/i.test(visible)
+      && await page.locator("#ranking").count() === 0 && await page.locator("dialog[open]").count() === 0,
+      "L15 a failing villain hit shows the pupil nothing and leaves the normal game over on screen");
+    await page.locator(".overlay .play-btn").click({ force: true });
+    check(await page.evaluate(() => document.body.dataset.level === "0"), "L15 a failing villain hit never blocks the replay");
+    noExceptions(game, "L15 failing hit");
+  } finally {
+    await game.browser.close();
+  }
+}
+
+// L15: the level-3 checkpoint and the final finish carry the same run as the save.
+async function hitsWithRunOnAdd() {
+  const adds = [];
+  const game = await gameWithClock(async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("action") !== "add") return reply(route, response([], 5));
+    adds.push(Object.fromEntries(url.searchParams));
+    return reply(route, response([{ name: "Panda Feliz", points: 100 }], 5));
+  });
+  try {
+    const { page } = game;
+    await chooseGrade(page, 5);
+    for (let level = 0; level < 3; level++) {
+      const result = await finishWithClock(page);
+      if (!result.finished) throw new Error("Could not reach the 5º checkpoint");
+    }
+    const ranking = page.locator("#ranking");
+    check(await ranking.count() === 1, "the level-3 checkpoint still offers the ranking");
+    check(await expectHits(game, 1) === 1, "L15 the level-3 checkpoint sends one villain hit");
+    const checkpoint = hitOf(game, 0);
+    const checkpointScore = await pointsOnScreen(page);
+    check(checkpoint.get("grade") === "5" && checkpoint.get("points") === String(checkpointScore)
+      && RUN_SHAPE.test(String(checkpoint.get("run"))),
+      `L15 the checkpoint hit carries the grade, the points so far and a valid run (${game.hitCalls[0]})`);
+    const run = checkpoint.get("run");
+    await fillKey(ranking);
+    await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
+    check(adds.length === 1 && adds[0].run === run, `L15 the add of that run carries the same run id (${JSON.stringify(adds[0])})`);
+    await page.locator(".overlay .play-btn").click({ force: true });
+    await page.waitForFunction(() => document.body.dataset.level === "3" && !document.querySelector(".overlay"), null, { polling: 100 });
+    const fourth = await finishWithClock(page);
+    await page.waitForFunction(() => !document.querySelector(".trophy-flight"), null, { polling: 100 });
+    check(fourth.finished, "the run reaches its final finish");
+    const finalScore = await pointsOnScreen(page);
+    check(await expectHits(game, 2) === 2, "L15 the final finish sends the run's last villain hit");
+    const finalHit = hitOf(game, 1);
+    check(finalHit.get("run") === run && finalHit.get("grade") === "5" && finalHit.get("points") === String(finalScore)
+      && finalScore > checkpointScore,
+      `L15 the final hit repeats the same run with the greater total, which the server keeps as a max (${finalScore} > ${checkpointScore})`);
+    const finalRanking = page.locator("#ranking");
+    await fillKey(finalRanking);
+    await finalRanking.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 100 });
+    check(adds.length === 2 && adds[1].run === run && adds[1].level === undefined,
+      `L15 the level-4 add of the same run keeps that run id (${JSON.stringify(adds[1])})`);
+    noExceptions(game, "L15 hits with run on add");
+  } finally {
+    await game.browser.close();
+  }
+}
+
 (async () => {
   for (const [label, run] of [["picture key and lock in 1º", () => pictureKeyAndLock(1)], ["picture key and lock in 2º", () => pictureKeyAndLock(2)],
     ["older-grade forms", olderGradeForms], ["lock picker and retry", lockPickerAndRetry], ["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
     ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
     ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["level three in 1º", () => levelThree(1)], ["level three in 2º", () => levelThree(2)], ["level three in 6º", () => levelThree(6)],
-    ["S6 unsaved final warning", unsavedFinalWarning], ["S6 unsaved checkpoint touch", unsavedCheckpointTouch], ["S6 unavailable and ordinary play", unavailableAndOrdinaryPlay], ["start preview", startPreview]]) {
+    ["S6 unsaved final warning", unsavedFinalWarning], ["S6 unsaved checkpoint touch", unsavedCheckpointTouch], ["S6 unavailable and ordinary play", unavailableAndOrdinaryPlay], ["start preview", startPreview],
+    ["L15 hits at game over", villainAtGameOver], ["L15 no hit with zero points", noHitWithoutPoints], ["L15 no hit without URL", noHitWithoutUrl],
+    ["L15 silent hit failure", silentHitFailure], ["L15 hits and run on add", hitsWithRunOnAdd]]) {
     try { await run(); } catch (e) { check(false, `${label}: ${e.stack || e}`); }
   }
   console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
