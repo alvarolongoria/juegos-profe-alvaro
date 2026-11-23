@@ -15,12 +15,16 @@
 //
 // «Golpes» (hits): the Ranking tab only keeps each pupil's best, so every saved
 // run also appends one row here. The monthly villain screen adds up those rows.
+// Each run of the game carries a random id («Partida»): the game may send an
+// anonymous hit when a run ends, also a lost one, and repeat it safely, and the
+// later save of that same run only names the row instead of counting it twice.
 // «Metas» (goals): the points each grade must reach this month. The teacher may
 // edit a goal by hand; a blank or impossible goal falls back to the default.
 //
 // Public requests (GET, so a <script> tag can call it too):
 //   ?action=top&grade=5                         -> top 10 of the current month
 //   ?action=villain                             -> monthly villain: goal and hits of the six grades
+//   ?action=hit&grade=5&points=1200&run=abc12345 -> one anonymous run of the villain, no name and no key
 //   ?action=add&animal=Tigre&adjective=Veloz&grade=1&points=1200&key=león&lock=3,0
 //   ?action=add&animal=Tigre&adjective=Veloz&grade=5&points=1200&key=sol&lock=3,0,7
 //     lock is two ordered palette indices for form grades 1º-2º, three for
@@ -117,7 +121,7 @@ var KEYS_HEADER = ["Curso", "Clave", "Mes"];
 var GRADES = [1, 2, 3, 4, 5, 6];
 // Every saved run is a hit for the monthly villain (the Ranking tab keeps only the best).
 var GOLPES_SHEET = "Golpes";
-var GOLPES_HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos"];
+var GOLPES_HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Partida"];
 // The points each grade must reach this month, editable by the teacher.
 var METAS_SHEET = "Metas";
 var METAS_HEADER = ["Curso", "Meta"];
@@ -127,6 +131,11 @@ var TIME_ZONE = "Europe/Madrid";
 var TOP_SIZE = 10;
 var MAX_POINTS = 100000;
 var MAX_ADDS_PER_MINUTE = 30;
+// Anonymous hits are much cheaper than a save, so they get a wider brake of their
+// own: it never uses up the save brake, and a save never uses up this one.
+var HITS_PER_MINUTE = 120;
+// The id of one run of the game, new on every start or restart.
+var RUN_SHAPE = /^[a-z0-9]{8,32}$/;
 
 function doGet(e) {
   var params = (e && e.parameter) || {};
@@ -138,6 +147,7 @@ function doGet(e) {
   try {
     if (params.action === "top") result = top(params);
     else if (params.action === "villain") result = villain();
+    else if (params.action === "hit") result = hit(params);
     else if (params.action === "add") result = add(params);
     else result = { ok: false, error: "unknown action" };
   } catch (error) {
@@ -574,6 +584,57 @@ function villain() {
   });
 }
 
+// The «Golpes» row of this month with this run id, or null. Rows written before
+// runs existed have no value in that column and never match.
+function hitRowOf(rows, month, run) {
+  if (!run) return null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][5] === undefined ? "" : rows[i][5]) !== run) continue;
+    if (monthOf(rows[i][1]) !== month) continue;
+    return { index: i + 2, row: rows[i] };
+  }
+  return null;
+}
+
+// A hit is worth the best moment of its run: the game sends it again at every
+// checkpoint, so the row is raised, never doubled and never lowered. The name is
+// written only when someone registers that run, so a hit stays anonymous until then.
+// Nothing is written when the stored row already holds the name and enough points.
+function raiseHit(tab, found, name, points) {
+  var row = found.row;
+  if (name && String(row[3] === undefined ? "" : row[3]) !== name) tab.getRange(found.index, 4).setValue(name);
+  var stored = Number(row[4]);
+  if (!isFinite(stored)) stored = 0;
+  if (points > stored) tab.getRange(found.index, 5).setValue(points);
+}
+
+// One run of the game, counted for the monthly villain only: it needs no name and
+// no class key, so a run lost at level 1-2 still helps the class. It never writes
+// a ranking row. The same run may arrive several times; the best points survive.
+function hit(params) {
+  var grade = readGrade(params.grade);
+  if (grade === null) return { ok: false, error: "bad grade" };
+  if (!/^\d{1,6}$/.test(String(params.points)) || Number(params.points) > MAX_POINTS) return { ok: false, error: "bad points" };
+  var run = typeof params.run === "string" && RUN_SHAPE.test(params.run) ? params.run : null;
+  if (!run) return { ok: false, error: "bad run" };
+  return withLock(function () {
+    // Its own slot: 120 hits never use up the 30 saves, and the other way round.
+    var cache = CacheService.getScriptCache();
+    var slot = "hits-" + Math.floor(Date.now() / 60000);
+    var count = Number(cache.get(slot) || 0);
+    if (count >= HITS_PER_MINUTE) return { ok: false, error: "too many" };
+    cache.put(slot, String(count + 1), 120);
+    // A run that ended with no points tells the villain nothing, so it is not logged.
+    var points = Number(params.points);
+    if (points === 0) return { ok: true };
+    var month = currentMonth(), tab = golpesSheet();
+    var found = hitRowOf(tab.getDataRange().getValues().slice(1), month, run);
+    if (found) raiseHit(tab, found, "", points);
+    else tab.appendRow([new Date(), "'" + month, grade, "", points, run]);
+    return { ok: true };
+  });
+}
+
 // The salt is unique to a row; neither the emoji indices nor the emojis are stored.
 function lockHash(salt, lock) {
   var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + ":" + lock);
@@ -598,6 +659,8 @@ function add(params) {
     if (typeof params.lock !== "string" || !lockShape.test(params.lock)) return { ok: false, error: "bad lock" };
     emojiLock = params.lock;
   }
+  // A malformed run id is ignored on purpose: it must never refuse a save.
+  var run = typeof params.run === "string" && RUN_SHAPE.test(params.run) ? params.run : null;
   return withLock(function () {
     // A simple brake against someone flooding the sheet or guessing keys.
     var cache = CacheService.getScriptCache();
@@ -642,7 +705,16 @@ function add(params) {
     }
     // The Ranking tab keeps only each pupil's best; the villain screen needs
     // every saved run, so a lower run is logged too. Nothing is logged on refusal.
-    golpesSheet().appendRow([values[0], "'" + month, grade, name, Number(params.points)]);
+    // The same run may have already logged an anonymous hit: that row then gets
+    // the name and the best points, so the villain counts each run only once.
+    var hits = golpesSheet();
+    if (run) {
+      var logged = hitRowOf(hits.getDataRange().getValues().slice(1), month, run);
+      if (logged) raiseHit(hits, logged, name, Number(params.points));
+      else hits.appendRow([values[0], "'" + month, grade, name, Number(params.points), run]);
+    } else {
+      hits.appendRow([values[0], "'" + month, grade, name, Number(params.points)]);
+    }
     // Read the written row and ranking together before another add can change either.
     SpreadsheetApp.flush();
     var found = topOf(grade, rowIndex, month);

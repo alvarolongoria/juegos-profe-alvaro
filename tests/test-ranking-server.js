@@ -1128,7 +1128,7 @@ function hitLog() {
   const first = add(game, { grade: "5", points: "1200" });
   const [hit] = golpes(game) || [];
   const header = game.sheets.Golpes ? game.sheets.Golpes.rows[0].join("|") : "no tab";
-  check(header === "Fecha|Mes|Curso|Nombre|Puntos",
+  check(header === "Fecha|Mes|Curso|Nombre|Puntos|Partida",
     `D a saved run creates the «Golpes» tab with its header (${header})`);
   check(first.ok === true && golpes(game).length === 1 && (hit || [])[0] instanceof game.context.Date
     && same((hit || []).slice(1), ["2026-11", 5, "Tigre Veloz", 1200]),
@@ -1271,6 +1271,191 @@ function villainCallback() {
   check(evil.mime === "JSON" && JSON.parse(evil.text).ok === false, "D an unsafe callback name is refused for villain too");
 }
 
+// ranking-justo T9/L15: every run of the game, also one lost at level 1-2, feeds the
+// villain through an anonymous hit. The ranking save itself does not change.
+const hit = (game, fields) => game.json({ action: "hit", ...fields });
+
+function hitAppends() {
+  const game = load();
+  const result = hit(game, { grade: "3", points: "1234", run: "run00000001" });
+  const [row] = golpes(game) || [];
+  check(same(result, { ok: true }) && golpes(game).length === 1 && (row || [])[0] instanceof game.context.Date
+    && same((row || []).slice(1), ["2026-11", 3, "", 1234, "run00000001"]),
+    `L15 an anonymous hit appends date, month, form grade, no name, points and its run id (${JSON.stringify((row || []).slice(1))})`);
+  const header = game.sheets.Golpes ? game.sheets.Golpes.rows[0].join("|") : "no tab";
+  check(header === "Fecha|Mes|Curso|Nombre|Puntos|Partida",
+    `L15 a hit creates the «Golpes» tab with its six-column header (${header})`);
+  check(game.sheets.Ranking === undefined, "L15 an anonymous hit never writes a ranking row");
+  const answer = game.json({ action: "villain" });
+  check(same((answer.grades || [])[2], { grade: 3, goal: 100000, taken: 1234, hits: [{ name: "", points: 1234 }] }),
+    `L15 the villain counts an anonymous hit under an empty name (${JSON.stringify((answer.grades || [])[2])})`);
+}
+
+function hitKeepsTheBest() {
+  const game = load();
+  hit(game, { grade: "4", points: "500", run: "abcdefgh1111" });
+  const raised = hit(game, { grade: "4", points: "900", run: "abcdefgh1111" });
+  const [row] = golpes(game) || [];
+  check(same(raised, { ok: true }) && golpes(game).length === 1
+    && same((row || []).slice(1), ["2026-11", 4, "", 900, "abcdefgh1111"]),
+    `L15 the same run twice keeps one row with the higher points (${JSON.stringify((row || []).slice(1))})`);
+  const writes = game.sheets.Golpes ? game.sheets.Golpes.writes : -1;
+  const lower = hit(game, { grade: "4", points: "400", run: "abcdefgh1111" });
+  check(same(lower, { ok: true }) && golpes(game).length === 1 && golpes(game)[0][4] === 900
+    && (game.sheets.Golpes || {}).writes === writes,
+    "L15 a lower second hit never lowers the stored points and writes nothing");
+  const equal = hit(game, { grade: "4", points: "900", run: "abcdefgh1111" });
+  check(same(equal, { ok: true }) && (game.sheets.Golpes || {}).writes === writes,
+    "L15 a repeated equal hit writes nothing");
+  hit(game, { grade: "4", points: "700", run: "zyxwvu9876" });
+  check(golpes(game).length === 2 && same(golpes(game).map((entry) => entry[4]), [900, 700]),
+    "L15 a different run gets its own row");
+}
+
+function runSharedByHitAndAdd() {
+  const game = load();
+  hit(game, { grade: "5", points: "800", run: "compartido1" });
+  const saved = add(game, { grade: "5", points: "1200", run: "compartido1" });
+  const [row] = golpes(game) || [];
+  check(saved.ok === true && game.rows().length === 1 && golpes(game).length === 1
+    && same((row || []).slice(1), ["2026-11", 5, "Tigre Veloz", 1200, "compartido1"]),
+    `L15 a hit then an add with the same run leaves one row, now named, with the better points (${JSON.stringify((row || []).slice(1))})`);
+
+  const lower = load();
+  hit(lower, { grade: "5", points: "1500", run: "compartido3" });
+  const weaker = add(lower, { grade: "5", points: "900", run: "compartido3" });
+  check(weaker.ok === true && golpes(lower).length === 1
+    && same((golpes(lower)[0] || []).slice(1), ["2026-11", 5, "Tigre Veloz", 1500, "compartido3"]),
+    "L15 an add never lowers the points the same run already took");
+
+  const logged = load();
+  add(logged, { grade: "5", points: "1200", run: "compartido2" });
+  check(golpes(logged).length === 1
+    && same((golpes(logged)[0] || []).slice(1), ["2026-11", 5, "Tigre Veloz", 1200, "compartido2"]),
+    "L15 an add with a run logs its hit with the run id");
+  const after = hit(logged, { grade: "5", points: "900", run: "compartido2" });
+  check(same(after, { ok: true }) && golpes(logged).length === 1
+    && same((golpes(logged)[0] || []).slice(1), ["2026-11", 5, "Tigre Veloz", 1200, "compartido2"]),
+    "L15 an add then a hit with the same run keeps one row and the name");
+  const better = hit(logged, { grade: "5", points: "2000", run: "compartido2" });
+  check(same(better, { ok: true }) && golpes(logged).length === 1
+    && same((golpes(logged)[0] || []).slice(1), ["2026-11", 5, "Tigre Veloz", 2000, "compartido2"]),
+    "L15 a later hit still raises the named row and keeps its name");
+}
+
+function addRunIsOptional() {
+  const game = load();
+  add(game, { grade: "5", points: "1200" });
+  check(golpes(game).length === 1 && golpes(game)[0].length === 5
+    && same((golpes(game)[0] || []).slice(1), ["2026-11", 5, "Tigre Veloz", 1200]),
+    `L15 an add without a run appends its hit exactly as before (${JSON.stringify((golpes(game)[0] || []).slice(1))})`);
+  for (const run of ["", "short", "MAYUS12345", "guion-12345", "x".repeat(33), "run with space", 12345678, null]) {
+    const fresh = load();
+    const saved = add(fresh, { grade: "5", points: "1200", run });
+    check(saved.ok === true && fresh.rows().length === 1 && golpes(fresh).length === 1 && golpes(fresh)[0].length === 5,
+      `L15 a malformed run ${JSON.stringify(run)} never refuses the save and logs a plain hit`);
+  }
+}
+
+function hitRejections() {
+  const cases = [
+    [{ grade: "0" }, "bad grade", "grade 0"],
+    [{ grade: "7" }, "bad grade", "grade 7"],
+    [{ grade: "3a" }, "bad grade", "a grade that is not a whole number"],
+    [{ points: "-5" }, "bad points", "negative points"],
+    [{ points: "12.5" }, "bad points", "points that are not a whole number"],
+    [{ points: "100001" }, "bad points", "impossible points"],
+    [{ points: "1234567" }, "bad points", "more than six digits of points"],
+    [{ points: "" }, "bad points", "missing points"],
+    [{ run: "" }, "bad run", "an empty run"],
+    [{ run: "short" }, "bad run", "a run shorter than eight characters"],
+    [{ run: "MAYUS12345" }, "bad run", "a run with capitals"],
+    [{ run: "guion-12345" }, "bad run", "a run with a dash"],
+    [{ run: "x".repeat(33) }, "bad run", "a run longer than 32 characters"],
+    [{ run: "run con espacio" }, "bad run", "a run with a space"],
+  ];
+  for (const [fields, error, label] of cases) {
+    const game = load();
+    const before = sheetState(game);
+    const answer = hit(game, { grade: "3", points: "10", run: "run00000001", ...fields });
+    check(same(answer, { ok: false, error }) && sheetState(game) === before,
+      `L15 a hit with ${label} is refused as «${error}» without touching a sheet (${JSON.stringify(answer)})`);
+  }
+  const zero = load();
+  check(same(hit(zero, { grade: "3", points: "0", run: "run00000002" }), { ok: true })
+    && zero.sheets.Golpes === undefined && zero.sheets.Ranking === undefined,
+    "L15 a hit of 0 points answers ok and logs no row");
+}
+
+function hitBrake() {
+  const game = load();
+  let accepted = 0;
+  for (let i = 0; i < 121; i++) {
+    if (hit(game, { grade: "3", points: "10", run: `run${String(i).padStart(9, "0")}` }).ok) accepted++;
+  }
+  check(accepted === 120 && golpes(game).length === 120, `L15 at most 120 hits per minute are logged (${accepted})`);
+  const refused = hit(game, { grade: "3", points: "10", run: "run999999999" });
+  check(same(refused, { ok: false, error: "too many" }) && golpes(game).length === 120,
+    `L15 over the hit brake the hit is refused and writes nothing (${JSON.stringify(refused)})`);
+  const saved = add(game, { grade: "5", points: "1200" });
+  check(saved.ok === true && game.rows().length === 1,
+    "L15 exhausting the hit brake does not block a save: the two brakes are separate");
+
+  const saves = load();
+  let added = 0;
+  for (let i = 0; i < 31; i++) if (add(saves, { grade: "5", points: "100" }).ok) added++;
+  const answer = hit(saves, { grade: "5", points: "100", run: "run00000077" });
+  check(added === 30 && same(answer, { ok: true }) && golpes(saves).length === 31,
+    `L15 exhausting the save brake does not block a hit (${JSON.stringify(answer)})`);
+}
+
+function oldGolpesTab() {
+  const game = load();
+  game.context.SpreadsheetApp.getActiveSpreadsheet().insertSheet("Golpes");
+  game.sheets.Golpes.appendRow(["Fecha", "Mes", "Curso", "Nombre", "Puntos"]);
+  game.sheets.Golpes.appendRow([new game.context.Date("2026-11-10T10:00:00Z"), "'2026-11", 3, "Lobo Feliz", 900]);
+  game.sheets.Golpes.appendRow([new game.context.Date("2026-10-10T10:00:00Z"), "'2026-10", 3, "Fantasma Feliz", 5000]);
+  const oldRows = JSON.stringify(game.sheets.Golpes.rows.slice(1));
+  const result = hit(game, { grade: "3", points: "100", run: "run00000003" });
+  const header = game.sheets.Golpes ? game.sheets.Golpes.rows[0].join("|") : "no tab";
+  check(same(result, { ok: true }) && header === "Fecha|Mes|Curso|Nombre|Puntos|Partida",
+    `L15 an old five-column «Golpes» tab gains the «Partida» title (${header})`);
+  check(JSON.stringify(game.sheets.Golpes.rows.slice(1, 3)) === oldRows, "L15 the old hit rows are left exactly as they were");
+  check(golpes(game).length === 3
+    && same((golpes(game).at(-1) || []).slice(1), ["2026-11", 3, "", 100, "run00000003"]),
+    "L15 a hit still appends its six-column row after the old ones");
+  const answer = game.json({ action: "villain" });
+  check(same((answer.grades || [])[2], { grade: 3, goal: 100000, taken: 1000, hits: [{ name: "", points: 100 }, { name: "Lobo Feliz", points: 900 }] }),
+    `L15 old five-column rows still count in the villain (${JSON.stringify((answer.grades || [])[2])})`);
+}
+
+function runOfAnotherMonth() {
+  const october = load("2026-10-20T10:00:00Z");
+  hit(october, { grade: "3", points: "5000", run: "run00000009" });
+  const november = load("2026-11-14T10:00:00Z", october.sheets);
+  const answer = hit(november, { grade: "3", points: "100", run: "run00000009" });
+  check(same(answer, { ok: true }) && golpes(november).length === 2 && golpes(november)[0][4] === 5000
+    && same((golpes(november).at(-1) || []).slice(1), ["2026-11", 3, "", 100, "run00000009"]),
+    "L15 last month's row with the same run id is not raised: the hit appends a new row");
+  const saved = add(november, { grade: "3", points: "200", run: "run00000009" });
+  check(saved.ok === true && golpes(november).length === 2 && golpes(november)[0][4] === 5000
+    && same((golpes(november)[1] || []).slice(1), ["2026-11", 3, "Tigre Veloz", 200, "run00000009"]),
+    `L15 an add names this month's hit row of its run and never last month's (${JSON.stringify(golpes(november).map((row) => row.slice(1)))})`);
+}
+
+function hitCallback() {
+  const game = load();
+  const wrapped = game.get({ action: "hit", grade: "3", points: "250", run: "run00000010", callback: "capitan_cb3" });
+  check(wrapped.mime === "JAVASCRIPT" && wrapped.text === 'capitan_cb3({"ok":true});',
+    `L15 a hit wraps its answer for a JSONP callback (${wrapped.text})`);
+  check(golpes(game).length === 1 && golpes(game)[0][4] === 250, "L15 the wrapped hit still logs its row");
+  const evil = game.get({ action: "hit", grade: "3", points: "250", run: "run00000011", callback: "alert(1)//" });
+  check(evil.mime === "JSON" && JSON.parse(evil.text).ok === false && golpes(game).length === 1,
+    "L15 an unsafe callback name is refused for a hit and logs nothing");
+  const plain = game.get({ action: "hit", grade: "3", points: "250", run: "run00000012" });
+  check(plain.mime === "JSON" && same(JSON.parse(plain.text), { ok: true }), "L15 without a callback a hit answers plain JSON");
+}
+
 lists();
 saveValid();
 rejectInvalid();
@@ -1307,5 +1492,14 @@ noHitOnFailure();
 villainScreen();
 villainGoals();
 villainCallback();
+hitAppends();
+hitKeepsTheBest();
+runSharedByHitAndAdd();
+addRunIsOptional();
+hitRejections();
+hitBrake();
+oldGolpesTab();
+runOfAnotherMonth();
+hitCallback();
 console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 process.exit(failCount ? 1 : 0);
