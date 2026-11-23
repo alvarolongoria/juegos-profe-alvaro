@@ -1456,6 +1456,53 @@ function hitCallback() {
   check(plain.mime === "JSON" && same(JSON.parse(plain.text), { ok: true }), "L15 without a callback a hit answers plain JSON");
 }
 
+// ranking-justo L16: a run id belongs to one pupil and one grade. A second pupil
+// reusing it never renames the first pupil's hit, and another grade never shares it.
+function runStaysWithItsPupil() {
+  const game = load();
+  const first = add(game, { grade: "3", points: "1200", run: "sharedrun01", lock: "0,1,2" });
+  const second = add(game, { grade: "3", points: "100", animal: "Panda", run: "sharedrun01", lock: "3,4,5" });
+  check(first.ok === true && second.ok === true && game.rows().length === 2 && golpes(game).length === 2
+    && same((golpes(game)[0] || []).slice(1), ["2026-11", 3, "Tigre Veloz", 1200, "sharedrun01"])
+    && same((golpes(game)[1] || []).slice(1), ["2026-11", 3, "Panda Veloz", 100, "sharedrun01"]),
+    `L16 a reused run id never renames or raises the first pupil's hit: the save appends its own row (${JSON.stringify(golpes(game).map((row) => row.slice(1)))})`);
+
+  const repeat = load();
+  add(repeat, { grade: "3", points: "1200", run: "samename01", lock: "0,1,2" });
+  add(repeat, { grade: "3", points: "1500", run: "samename01", lock: "0,1,2" });
+  check(golpes(repeat).length === 1
+    && same((golpes(repeat)[0] || []).slice(1), ["2026-11", 3, "Tigre Veloz", 1500, "samename01"]),
+    `L16 the same pupil repeating its own run only raises its hit (${JSON.stringify((golpes(repeat)[0] || []).slice(1))})`);
+  add(repeat, { grade: "3", points: "900", run: "samename01", lock: "0,1,2" });
+  check(golpes(repeat).length === 1 && golpes(repeat)[0][4] === 1500,
+    "L16 repeating its own run with fewer points never lowers the hit");
+
+  const anonymous = load();
+  hit(anonymous, { grade: "3", points: "800", run: "anonimo001" });
+  const named = add(anonymous, { grade: "3", points: "900", run: "anonimo001", lock: "0,1,2" });
+  check(named.ok === true && golpes(anonymous).length === 1
+    && same((golpes(anonymous)[0] || []).slice(1), ["2026-11", 3, "Tigre Veloz", 900, "anonimo001"]),
+    "L16 an anonymous row of the saved run takes the name and the best points");
+}
+
+function runBelongsToItsGrade() {
+  const game = load();
+  hit(game, { grade: "6", points: "500", run: "cruzado001" });
+  const other = hit(game, { grade: "3", points: "700", run: "cruzado001" });
+  check(same(other, { ok: true }) && golpes(game).length === 2
+    && same((golpes(game)[0] || []).slice(1), ["2026-11", 6, "", 500, "cruzado001"])
+    && same((golpes(game)[1] || []).slice(1), ["2026-11", 3, "", 700, "cruzado001"]),
+    `L16 a hit whose run id belongs to another grade appends its own row and raises nothing (${JSON.stringify(golpes(game).map((row) => row.slice(1)))})`);
+
+  const saved = load();
+  hit(saved, { grade: "6", points: "500", run: "cruzado002" });
+  const answer = add(saved, { grade: "3", points: "900", run: "cruzado002", lock: "0,1,2" });
+  check(answer.ok === true && golpes(saved).length === 2
+    && same((golpes(saved)[0] || []).slice(1), ["2026-11", 6, "", 500, "cruzado002"])
+    && same((golpes(saved)[1] || []).slice(1), ["2026-11", 3, "Tigre Veloz", 900, "cruzado002"]),
+    "L16 a save names only the row of its own grade and never the other grade's");
+}
+
 lists();
 saveValid();
 rejectInvalid();
@@ -1501,5 +1548,7 @@ hitBrake();
 oldGolpesTab();
 runOfAnotherMonth();
 hitCallback();
+runStaysWithItsPupil();
+runBelongsToItsGrade();
 console.log(`TOTAL: ${okCount} ok, ${failCount} FAIL`);
 process.exit(failCount ? 1 : 0);

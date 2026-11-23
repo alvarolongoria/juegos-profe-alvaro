@@ -584,26 +584,26 @@ function villain() {
   });
 }
 
-// The «Golpes» row of this month with this run id, or null. Rows written before
-// runs existed have no value in that column and never match.
-function hitRowOf(rows, month, run) {
+// The «Golpes» row of this month with this run id in this grade, or null. Month,
+// run and grade must all agree: a run belongs to one pupil of one grade, so a hit
+// or a save of another grade never counts on it. Rows written before runs existed
+// have no value in that column and never match.
+function hitRowOf(rows, month, run, grade) {
   if (!run) return null;
   for (var i = 0; i < rows.length; i++) {
     if (String(rows[i][5] === undefined ? "" : rows[i][5]) !== run) continue;
     if (monthOf(rows[i][1]) !== month) continue;
+    if (Number(rows[i][2]) !== grade) continue;
     return { index: i + 2, row: rows[i] };
   }
   return null;
 }
 
 // A hit is worth the best moment of its run: the game sends it again at every
-// checkpoint, so the row is raised, never doubled and never lowered. The name is
-// written only when someone registers that run, so a hit stays anonymous until then.
-// Nothing is written when the stored row already holds the name and enough points.
-function raiseHit(tab, found, name, points) {
-  var row = found.row;
-  if (name && String(row[3] === undefined ? "" : row[3]) !== name) tab.getRange(found.index, 4).setValue(name);
-  var stored = Number(row[4]);
+// checkpoint, so the row is raised, never doubled and never lowered. It never
+// writes a name: only the save of that same run knows who the pupil is.
+function raiseHit(tab, found, points) {
+  var stored = Number(found.row[4]);
   if (!isFinite(stored)) stored = 0;
   if (points > stored) tab.getRange(found.index, 5).setValue(points);
 }
@@ -628,8 +628,8 @@ function hit(params) {
     var points = Number(params.points);
     if (points === 0) return { ok: true };
     var month = currentMonth(), tab = golpesSheet();
-    var found = hitRowOf(tab.getDataRange().getValues().slice(1), month, run);
-    if (found) raiseHit(tab, found, "", points);
+    var found = hitRowOf(tab.getDataRange().getValues().slice(1), month, run, grade);
+    if (found) raiseHit(tab, found, points);
     else tab.appendRow([new Date(), "'" + month, grade, "", points, run]);
     return { ok: true };
   });
@@ -705,13 +705,19 @@ function add(params) {
     }
     // The Ranking tab keeps only each pupil's best; the villain screen needs
     // every saved run, so a lower run is logged too. Nothing is logged on refusal.
-    // The same run may have already logged an anonymous hit: that row then gets
-    // the name and the best points, so the villain counts each run only once.
+    // This run may already be on the board from its anonymous hits: an anonymous
+    // row takes this pupil's name, and a row already carrying the same name only
+    // goes up. Another pupil's row is never renamed, so this save gets its own.
     var hits = golpesSheet();
     if (run) {
-      var logged = hitRowOf(hits.getDataRange().getValues().slice(1), month, run);
-      if (logged) raiseHit(hits, logged, name, Number(params.points));
-      else hits.appendRow([values[0], "'" + month, grade, name, Number(params.points), run]);
+      var logged = hitRowOf(hits.getDataRange().getValues().slice(1), month, run, grade);
+      var owner = logged ? String(logged.row[3] === undefined ? "" : logged.row[3]) : null;
+      if (owner === "" || owner === name) {
+        if (owner === "") hits.getRange(logged.index, 4).setValue(name);
+        raiseHit(hits, logged, Number(params.points));
+      } else {
+        hits.appendRow([values[0], "'" + month, grade, name, Number(params.points), run]);
+      }
     } else {
       hits.appendRow([values[0], "'" + month, grade, name, Number(params.points)]);
     }
