@@ -410,6 +410,36 @@ async function busySave(recovers) {
   }
 }
 
+// ranking-arreglos verify (S1, low): leaving with «Jugar sin guardar» stops pending retries.
+async function busySaveLeftBehind() {
+  const adds = [];
+  const game = await gameWithClock(async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("action") !== "add") return reply(route, response([], 3));
+    adds.push(url.search);
+    return reply(route, { ok: false, error: "too many" });
+  });
+  const label = "S1 leaving without saving";
+  try {
+    const { page } = game;
+    await page.addInitScript(() => { window.RANKING_RETRY_DELAYS = [400, 400, 400]; });
+    await page.reload();
+    await win(page, 3);
+    const ranking = page.locator("#ranking");
+    await fillKey(ranking);
+    await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("Mucha gente guardando… lo intento de nuevo"), null, { polling: 50 });
+    await page.locator(".overlay .play-btn").click({ force: true });
+    await page.getByRole("button", { name: "Jugar sin guardar" }).click();
+    const before = adds.length;
+    await page.waitForTimeout(1600);
+    check(before >= 1 && adds.length === before, `${label}: no retry is sent after the pupil leaves (${before} → ${adds.length})`);
+    noExceptions(game, label);
+  } finally {
+    await game.browser.close();
+  }
+}
+
 async function viewWithoutSaving() {
   const requests = [];
   let views = 0;
@@ -1452,7 +1482,7 @@ async function hitsWithRunOnAdd() {
 (async () => {
   for (const [label, run] of [["picture key and lock in 1º", () => pictureKeyAndLock(1)], ["picture key and lock in 2º", () => pictureKeyAndLock(2)],
     ["older-grade forms", olderGradeForms], ["lock picker and retry", lockPickerAndRetry], ["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
-    ["network error", () => failedSave("network")], ["S1 braked save recovers", () => busySave(true)], ["S1 braked save gives up", () => busySave(false)], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
+    ["network error", () => failedSave("network")], ["S1 braked save recovers", () => busySave(true)], ["S1 braked save gives up", () => busySave(false)], ["S1 leaving without saving", busySaveLeftBehind], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
     ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["level three in 1º", () => levelThree(1)], ["level three in 2º", () => levelThree(2)], ["level three in 6º", () => levelThree(6)],
     ["S6 unsaved final warning", unsavedFinalWarning], ["S6 unsaved checkpoint touch", unsavedCheckpointTouch], ["S6 unavailable and ordinary play", unavailableAndOrdinaryPlay], ["start preview", startPreview],
     ["L15 hits at game over", villainAtGameOver], ["L15 no hit with zero points", noHitWithoutPoints], ["L15 no hit without URL", noHitWithoutUrl],

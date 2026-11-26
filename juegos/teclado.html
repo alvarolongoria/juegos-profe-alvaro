@@ -1309,6 +1309,8 @@
               if (!(error instanceof BusyServer) || attempt >= delays.length) throw error;
               if (version === requestVersion) message.textContent = "Mucha gente guardando… lo intento de nuevo";
               await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+              // The pupil chose to play on without saving: nothing more is sent.
+              if (leavingWithoutSaving || !section.isConnected) throw error;
             }
           }
         }
