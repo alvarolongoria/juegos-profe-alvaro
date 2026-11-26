@@ -31,12 +31,13 @@ img {
   -webkit-user-drag: none;
 }
 
-/* Home button: always top-left, always the same. */
+/* Home button: always top-left, always the same, and above overlays (100)
+   so a child can leave from any start, ranking or end screen. */
 .home-btn {
   position: fixed;
   top: 16px;
   left: 16px;
-  z-index: 50;
+  z-index: 101;
   width: 80px;
   height: 80px;
   border-radius: 50%;

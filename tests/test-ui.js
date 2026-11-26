@@ -49,6 +49,11 @@ const sizes = [[1024, 600], [1366, 657], [1516, 694], [1366, 768], [1920, 1080]]
       }
     }
     check(await p.locator('.play-btn').first().evaluate(el => getComputedStyle(el).animationName === 'none'), `${id}: reduced-motion play`);
+    // The home button must stay reachable above any overlay (start, ranking, end).
+    check(await p.locator('.home-btn').evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === el;
+    }), `${id}: home button reachable above the overlay`);
     await pressPlay(p);
     check(await p.locator('.overlay').count() === 0, `${id}: play dismisses overlay`);
     if (id !== 'teclado') {
