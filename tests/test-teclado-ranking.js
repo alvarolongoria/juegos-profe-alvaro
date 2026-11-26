@@ -365,6 +365,51 @@ async function failedSave(kind) {
   }
 }
 
+// ranking-arreglos S1: a save braked by the server ("too many") is retried automatically,
+// a bounded number of times, with the same parameters; then the gentle error as before.
+async function busySave(recovers) {
+  const adds = [];
+  let releaseBusy;
+  const busyGate = new Promise((resolve) => { releaseBusy = resolve; });
+  const game = await gameWithClock(async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("action") !== "add") return reply(route, response([], 3));
+    adds.push(url.search);
+    // The second braked answer waits so the test can read the waiting message.
+    if (adds.length === 2) await busyGate;
+    if (recovers && adds.length === 3) return reply(route, response([{ name: "Zorro Veloz", points: 120 }], 3));
+    return reply(route, { ok: false, error: "too many" });
+  });
+  const label = recovers ? "S1 braked save recovers" : "S1 braked save gives up";
+  try {
+    const { page } = game;
+    await page.addInitScript(() => { window.RANKING_RETRY_DELAYS = [50, 50, 50]; });
+    await page.reload();
+    await win(page, 3);
+    const ranking = page.locator("#ranking");
+    await fillKey(ranking);
+    await ranking.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("Mucha gente guardando… lo intento de nuevo"), null, { polling: 50 });
+    check(true, `${label}: shows the waiting message while braked`);
+    check(await ranking.getByRole("button", { name: "Guardar", exact: true }).isDisabled(), `${label}: no second manual save while waiting`);
+    releaseBusy();
+    if (recovers) {
+      await page.waitForFunction(() => document.querySelectorAll("#ranking ol li").length === 1, null, { polling: 50 });
+      const text = await ranking.innerText();
+      check(adds.length === 3, `${label}: two braked answers then one success, three adds (${adds.length})`);
+      check(!text.includes("No se pudo guardar") && !text.includes("Mucha gente guardando"), `${label}: no error or waiting text after success`);
+    } else {
+      await page.waitForFunction(() => document.querySelector("#ranking")?.textContent.includes("No se pudo guardar ahora. Inténtalo más tarde."), null, { polling: 50 });
+      check(adds.length === 4, `${label}: one save and exactly three retries (${adds.length})`);
+    }
+    check(adds.every((search) => search === adds[0]), `${label}: every retry repeats the same save`);
+    noExceptions(game, label);
+  } finally {
+    releaseBusy();
+    await game.browser.close();
+  }
+}
+
 async function viewWithoutSaving() {
   const requests = [];
   let views = 0;
@@ -1407,7 +1452,7 @@ async function hitsWithRunOnAdd() {
 (async () => {
   for (const [label, run] of [["picture key and lock in 1º", () => pictureKeyAndLock(1)], ["picture key and lock in 2º", () => pictureKeyAndLock(2)],
     ["older-grade forms", olderGradeForms], ["lock picker and retry", lockPickerAndRetry], ["key errors", keyErrors], ["empty URL", withoutUrl], ["save and safety", saveAndSafety], ["server error", () => failedSave("server")],
-    ["network error", () => failedSave("network")], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
+    ["network error", () => failedSave("network")], ["S1 braked save recovers", () => busySave(true)], ["S1 braked save gives up", () => busySave(false)], ["view without saving", viewWithoutSaving], ["grade 1 and replay", gradeOneAndRepeat],
     ["replay every grade", replayEveryGrade], ["retry lost level", retryLostLevel], ["view errors", failedView], ["overlapping requests", overlappingRequests], ["level three in 3º", levelThree], ["level three in 1º", () => levelThree(1)], ["level three in 2º", () => levelThree(2)], ["level three in 6º", () => levelThree(6)],
     ["S6 unsaved final warning", unsavedFinalWarning], ["S6 unsaved checkpoint touch", unsavedCheckpointTouch], ["S6 unavailable and ordinary play", unavailableAndOrdinaryPlay], ["start preview", startPreview],
     ["L15 hits at game over", villainAtGameOver], ["L15 no hit with zero points", noHitWithoutPoints], ["L15 no hit without URL", noHitWithoutUrl],

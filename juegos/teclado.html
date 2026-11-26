@@ -1275,6 +1275,8 @@
         class RetryableRefusal extends Error {
           constructor(text) { super(text); this.text = text; }
         }
+        // The server brakes saves to 30 a minute: a whole class finishing together may hit it.
+        class BusyServer extends Error {}
         async function request(params) {
           const url = new URL(rankingUrl, window.location.href);
           for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
@@ -1289,11 +1291,26 @@
           if (result && result.ok === false && result.error === "wrong grade" && /^[1-6]$/.test(String(result.keyGrade))) {
             throw new RetryableRefusal(`Con ${usesPictures ? "el dibujo" : "la clave"} de ${result.keyGrade}º no puedes entrar en el ranking de ${resultGrade}º.`);
           }
+          if (result && result.ok === false && result.error === "too many") throw new BusyServer("Ranking busy");
           if (result && result.ok === false && result.error === "name taken") {
             throw new RetryableRefusal("Ese nombre ya es de un compañero con otros emojis. Elige otro nombre o revisa tus emojis.");
           }
           if (!result || result.ok !== true || !Array.isArray(result.top)) throw new Error("Ranking response failed");
           return result;
+        }
+        // ranking-arreglos S1: when braked, wait and send the same save again a few times.
+        // The server's minute windows are fixed, so the waits grow to reach the next minute.
+        async function addWithRetries(params, version) {
+          const delays = Array.isArray(window.RANKING_RETRY_DELAYS) ? window.RANKING_RETRY_DELAYS : [8000, 15000, 25000];
+          for (let attempt = 0; ; attempt++) {
+            try {
+              return await request(params);
+            } catch (error) {
+              if (!(error instanceof BusyServer) || attempt >= delays.length) throw error;
+              if (version === requestVersion) message.textContent = "Mucha gente guardando… lo intento de nuevo";
+              await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+            }
+          }
         }
         function render(top) {
           message.textContent = top.length ? "" : "Todavía no hay nadie este mes";
@@ -1330,7 +1347,8 @@
           const name = `${animal.value} ${adjective.value}`;
           message.textContent = "Guardando…";
           try {
-            const result = await request({ action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: keyValue, lock: chosen.join(","), ...(runId ? { run: runId } : {}), ...(resultLevel === 3 ? { level: 3 } : {}) });
+            const params = { action: "add", animal: animal.value, adjective: adjective.value, grade: resultGrade, points: resultScore, key: keyValue, lock: chosen.join(","), ...(runId ? { run: runId } : {}), ...(resultLevel === 3 ? { level: 3 } : {}) };
+            const result = await addWithRetries(params, version);
             rankingAvailable = true;
             // An older server sends no "me": then nothing personal is shown, as before.
             const me = result.me;
