@@ -568,7 +568,7 @@ function unlockName(params) {
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       if (row[3] !== name || !isLockedRankingRow(row, month, grade)) continue;
-      // With duplicates, report the first row, which is also the first claim candidate.
+      // Report the first matching row even when several rows are freed.
       if (points === null) points = rankingPoints(row[4]);
       if (row[7] !== FREE_LOCK) tab.getRange(i + 2, 8).setValue(FREE_LOCK);
     }
@@ -737,29 +737,35 @@ function add(params) {
     // A key enters its own grade or an older one, never a younger one.
     if (real > grade) return { ok: false, error: "wrong grade", keyGrade: real };
     var tab = sheet(), month = currentMonth();
-    var stored = "", rowIndex = -1, oldRow, claiming = false;
-    if (emojiLock !== null) {
-      var rows = tab.getDataRange().getValues().slice(1);
-      for (var i = 0; i < rows.length; i++) {
-        var row = rows[i];
-        if (row[3] !== name || !isLockedRankingRow(row, month, grade)) continue;
-        var savedLock = String(row[7]), free = savedLock === FREE_LOCK;
-        if (!free) {
-          var pieces = savedLock.split(":");
-          if (pieces.length !== 2 || lockHash(pieces[0], emojiLock) !== pieces[1]) return { ok: false, error: "name taken" };
-        }
-        // Prefer a free row, but keep checking for conflicting locks on the same name.
-        if (rowIndex < 0 || (free && !claiming)) {
-          rowIndex = i + 2;
-          oldRow = row;
-          stored = savedLock;
-          claiming = free;
-        }
+    var rows = tab.getDataRange().getValues().slice(1);
+    var stored = "", rowIndex = -1, freeIndex = -1;
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (row[3] !== name || !isLockedRankingRow(row, month, grade)) continue;
+      var savedLock = String(row[7]);
+      if (emojiLock === null) {
+        // Legacy saves can still append beside a real lock, but not a free name.
+        if (savedLock === FREE_LOCK) return { ok: false, error: "name taken" };
+        continue;
       }
-      if (rowIndex < 0 || claiming) {
-        var salt = Utilities.getUuid();
-        stored = salt + ":" + lockHash(salt, emojiLock);
+      if (savedLock === FREE_LOCK) {
+        // Prefer higher points; on a tie keep the first row.
+        if (freeIndex < 0 || rankingPoints(row[4]) > rankingPoints(rows[freeIndex][4])) freeIndex = i;
+        continue;
       }
+      var pieces = savedLock.split(":");
+      if (pieces.length !== 2 || lockHash(pieces[0], emojiLock) !== pieces[1]) return { ok: false, error: "name taken" };
+      if (rowIndex < 0) {
+        rowIndex = i + 2;
+        stored = savedLock;
+      }
+    }
+    // An existing matching lock wins over any free candidate.
+    var claiming = rowIndex < 0 && freeIndex >= 0;
+    if (claiming) rowIndex = freeIndex + 2;
+    if (emojiLock !== null && (rowIndex < 0 || claiming)) {
+      var salt = Utilities.getUuid();
+      stored = salt + ":" + lockHash(salt, emojiLock);
     }
     // The apostrophe keeps the month as text, so Sheets never turns it into a date.
     var values = [new Date(), "'" + month, grade, name, Number(params.points), real, level, stored];
@@ -767,6 +773,7 @@ function add(params) {
       tab.appendRow(values);
       rowIndex = tab.getLastRow();
     } else {
+      var oldRow = rows[rowIndex - 2];
       var oldLevel = oldRow[6] === "" || oldRow[6] === undefined ? 4 : Number(oldRow[6]);
       if (level > oldLevel || (level === oldLevel && Number(params.points) > Number(oldRow[4]))) {
         tab.getRange(rowIndex, 1, 1, HEADER.length).setValues([values]);

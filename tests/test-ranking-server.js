@@ -886,6 +886,58 @@ function unlockDuplicateRows() {
     "ranking-arreglos S2 unlock marks all matching non-empty locks free without changing either result");
 }
 
+function locklessCannotClaim() {
+  const game = load();
+  const name = "Tigre Veloz";
+  add(game, { lock: "1,2,3" });
+  const released = rankingPost(game, "unlock", { name });
+  const free = game.rows()[0].slice();
+  const before = sheetState(game);
+  const saved = add(game, { points: "1500" });
+  check(released.ok === true && free[7] === "LIBRE" && same(saved, { ok: false, error: "name taken" })
+    && game.rows().length === 1 && sheetState(game) === before,
+    `ranking-arreglos S2 a legacy grade-5 add cannot claim or duplicate a free name (${JSON.stringify(saved)})`);
+  const otherName = add(game, { animal: "Panda" });
+  const otherGrade = add(game, { grade: "6" });
+  const nextMonth = load("2026-12-01T10:00:00Z", game.sheets);
+  const otherMonth = add(nextMonth, {});
+  check(otherName.ok === true && otherGrade.ok === true && otherMonth.ok === true
+    && nextMonth.rows().length === 4 && same(nextMonth.rows()[0], free),
+    "ranking-arreglos S2 a free row does not block a legacy add with a different name, grade or month");
+}
+
+function claimBestUnlockedName() {
+  for (const [firstPoints, claimedIndex, selection] of [
+    ["900", 1, "the free homonym with the most points"],
+    ["1600", 0, "the first free homonym when points tie"],
+  ]) {
+    const game = load();
+    const name = "Tigre Veloz", lock = "7,8,9", freeIndex = 1 - claimedIndex;
+    add(game, { points: firstPoints, lock: "1,2,3" });
+    add(game, { animal: "Panda", points: "1600", level: "3", lock: "4,5,6" });
+    game.sheets.Ranking.rows[2][3] = name; // homonym from a manual sheet edit
+    rankingPost(game, "unlock", { name });
+    const released = game.rows().map((row) => row.slice());
+    const form = { points: "800", level: "3", lock, run: "reclaim01" };
+    const saved = add(game, form);
+    const rows = game.rows(), claimed = rows[claimedIndex], claimedHash = claimed?.[7];
+    check(released.length === 2 && released.every((row) => row[7] === "LIBRE") && saved.ok === true && saved.me?.points === 1600
+      && rows.length === 2 && same(rows[freeIndex], released[freeIndex])
+      && same(claimed.slice(0, 7), released[claimedIndex].slice(0, 7)) && validHash(claimedHash, lock),
+      `ranking-arreglos S2 a new lock claims only ${selection}`);
+    const after = sheetState(game);
+    const retry = add(game, form);
+    check(saved.ok === true && same(retry, saved) && sheetState(game) === after,
+      `ranking-arreglos S2 repeating the same add leaves both homonyms unchanged after claiming ${selection}`);
+    const improved = add(game, { ...form, points: "1700", level: "4" });
+    const updated = game.rows();
+    check(improved.ok === true && same(improved.me, expectedMe(name, 1700, 1, 2)) && updated.length === 2
+      && updated[claimedIndex][4] === 1700 && updated[claimedIndex][6] === 4 && updated[claimedIndex][7] === claimedHash
+      && same(updated[freeIndex], released[freeIndex]),
+      `ranking-arreglos S2 an improved add updates only the same-lock row after claiming ${selection}`);
+  }
+}
+
 // S1: identify the exact written row, including ties and old unlocked duplicates.
 function ownPosition() {
   const game = load();
@@ -1666,6 +1718,8 @@ lockedNameAdmin();
 unlockValidation();
 claimUnlockedName();
 unlockDuplicateRows();
+locklessCannotClaim();
+claimBestUnlockedName();
 ownPosition();
 ownPositionOutsideTop();
 lockRejections();
