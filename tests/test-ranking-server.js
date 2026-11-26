@@ -1,5 +1,5 @@
 // Ranking server (S11): the Google Apps Script in ranking/Code.gs runs here in a
-// Node sandbox with fake Google services, through its public doGet entry point.
+// Node sandbox with fake Google services, through its public doGet and doPost entry points.
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -749,6 +749,141 @@ function dateCellsAndForgottenLock() {
     && same(row.slice(1, 7), ["2026-11", 5, "Tigre Veloz", 200, 5, 4]) && validHash(row[7], "0,4,11")
     && row[7] !== previousHash && noLockLeak(game.sheets.Ranking.rows, [lock, "0,4,11"]),
     "S3 deleting a forgotten lock's row frees the name for a new lock with a fresh salt");
+}
+
+const rankingPost = (game, action, fields = {}) => game.post({ action, grade: "5", secret: SECRET, ...fields });
+
+function lockedNameAdmin() {
+  const lock = "1,2,3", name = "Tigre Veloz";
+  const october = load("2026-10-20T10:00:00Z");
+  add(october, { lock, points: "9000" });
+  const game = load("2026-11-14T10:00:00Z", october.sheets);
+  const keys = game.keys();
+  add(game, { lock, key: keys[4], points: "600" });
+  add(game, { animal: "León", lock, level: "3", points: "2500" });
+  add(game, { grade: "6", lock, key: keys[5], points: "7000" });
+  add(game, { points: "8000" }); // legacy row with the same name
+  const tab = game.sheets.Ranking;
+  const lionRow = tab.rows[3];
+  lionRow[1] = new game.context.Date("2026-11-01T00:00:00Z");
+  lionRow[4] = "2500";
+  lionRow[6] = "3";
+
+  const before = sheetState(game);
+  for (const action of ["names", "unlock"]) {
+    const params = { action, grade: "5", name };
+    const forbidden = { ok: false, error: "forbidden" };
+    check(same(game.post(params), forbidden) && same(game.post({ ...params, secret: "wrong" }), forbidden)
+      && same(game.json({ ...params, secret: SECRET }), { ok: false, error: "unknown action" })
+      && sheetState(game) === before, `ranking-arreglos S2 ${action} needs an authenticated POST`);
+  }
+  check(same(rankingPost(game, "names", { grade: "05" }), { ok: false, error: "bad grade" }) && sheetState(game) === before,
+    "ranking-arreglos S2 names refuses a grade that is not a single digit from 1 to 6");
+  const lion = { name: "León Veloz", points: 2500, level: 3, free: false };
+  const tiger = { name, points: 600, level: 4, free: false };
+  const listed = rankingPost(game, "names");
+  check(same(listed, { ok: true, grade: 5, names: [lion, tiger] }) && sheetState(game) === before,
+    `ranking-arreglos S2 names lists only current-month reservations by ranking grade, sorted by numeric points (${JSON.stringify(listed)})`);
+
+  const expectedRows = tab.rows.map((row) => row.slice());
+  const hitsBefore = JSON.stringify(golpes(game));
+  const start = game.events.length;
+  const released = rankingPost(game, "unlock", { name });
+  const marker = tab.rows[2][7];
+  check(same(released, { ok: true, grade: 5, name, points: 600 }) && game.events.slice(start).join() === "lock,flush,release",
+    `ranking-arreglos S2 unlock returns the selected row's points and writes under the script lock (${JSON.stringify(released)})`);
+  expectedRows[2][7] = marker;
+  check(typeof marker === "string" && marker !== "" && !validHash(marker, lock) && same(tab.rows, expectedRows)
+    && JSON.stringify(golpes(game)) === hitsBefore,
+    "ranking-arreglos S2 unlock changes only Candado, leaving same-name rows in other grades, months and legacy rows alone");
+  const unlocked = sheetState(game);
+  check(same(rankingPost(game, "names"), { ok: true, grade: 5, names: [lion, { ...tiger, free: true }] }) && sheetState(game) === unlocked,
+    "ranking-arreglos S2 names includes the released row with free true and leaks no lock data");
+  check(released.ok === true && same(rankingPost(game, "unlock", { name }), released) && sheetState(game) === unlocked,
+    "ranking-arreglos S2 unlocking an already-free row still returns its points");
+  check(same(add(game, { lock: marker }), { ok: false, error: "bad lock" }) && sheetState(game) === unlocked,
+    "ranking-arreglos S2 the free marker itself cannot be sent as an emoji lock");
+}
+
+function unlockValidation() {
+  const game = load();
+  const name = "Tigre Veloz";
+  check(same(rankingPost(game, "names"), { ok: true, grade: 5, names: [] })
+    && same(rankingPost(game, "unlock", { name }), { ok: false, error: "not found" }) && !game.sheets.Ranking,
+    "ranking-arreglos S2 missing Ranking yields an empty list and not found without creating a tab");
+  add(game, { points: "2200" }); // old page with no lock
+  const before = sheetState(game);
+  for (const [fields, error] of [
+    [{ grade: "7", name }, "bad grade"],
+    [{}, "bad name"],
+    [{ name: "" }, "bad name"],
+    [{ name: "tigre Veloz" }, "bad name"],
+    [{ name: "Tigre  Veloz" }, "bad name"],
+    [{ name: "Tigre Desconocido" }, "bad name"],
+    [{ name: "Panda Feliz" }, "not found"],
+    [{ name }, "not found"],
+  ]) {
+    const result = rankingPost(game, "unlock", fields);
+    check(same(result, { ok: false, error }) && sheetState(game) === before,
+      `ranking-arreglos S2 unlock ${JSON.stringify(fields)} returns ${error} without writes (${JSON.stringify(result)})`);
+  }
+  const legacy = game.rows()[0].slice();
+  const lock = "1,2,3";
+  const saved = add(game, { lock, points: "900" });
+  const top = [{ name, points: 2200 }, { name, points: 900 }];
+  check(same(saved, expectedAdd(5, "2026-11", top, expectedMe(name, 900, 2, 2))) && game.rows().length === 2
+    && same(game.rows()[0], legacy) && validHash(game.rows()[1][7], lock),
+    "ranking-arreglos S2 a legacy empty-lock row is never claimed by a locked add");
+}
+
+function claimUnlockedName() {
+  for (const [grade, oldLevel, level, points, bestLevel, bestPoints] of [
+    [5, 3, 3, 1600, 3, 1600], // higher score at the same level
+    [5, 4, 4, 900, 4, 1200],  // lower score at the same level
+    [2, 3, 4, 900, 4, 900],   // level 4 beats level 3 despite the lower score
+    [1, 4, 3, 1600, 4, 1200], // level 3 does not replace level 4
+  ]) {
+    const game = load();
+    const name = "Tigre Veloz", oldLock = grade <= 2 ? "1,2" : "1,2,3", lock = grade <= 2 ? "4,5" : "4,5,6";
+    const form = { grade: String(grade), key: game.keys()[grade] };
+    add(game, { ...form, level: String(oldLevel), lock: oldLock });
+    const oldHash = game.rows()[0][7];
+    rankingPost(game, "unlock", { grade: form.grade, name });
+    if (grade <= 2) {
+      const before = sheetState(game);
+      check(same(add(game, { ...form, lock: undefined }), { ok: false, error: "bad lock" }) && sheetState(game) === before,
+        `ranking-arreglos S2 an unlocked name still needs a lock in grade ${grade}`);
+    }
+    const saved = add(game, { ...form, level: String(level), points: String(points), lock });
+    const [row] = game.rows();
+    const top = [{ name, points: bestPoints, ...(bestLevel === 3 ? { level: 3 } : {}) }];
+    check(same(saved, expectedAdd(grade, "2026-11", top, expectedMe(name, bestPoints, 1, 1, bestLevel)))
+      && game.rows().length === 1 && row[4] === bestPoints && row[6] === bestLevel && validHash(row[7], lock) && row[7] !== oldHash
+      && golpes(game).length === 2 && same(golpes(game)[1].slice(1), ["2026-11", grade, name, points]),
+      `ranking-arreglos S2 a new lock claims the same row in grade ${grade}, keeping the best level and points (${JSON.stringify(saved)})`);
+    const before = sheetState(game);
+    check(same(add(game, { ...form, lock: oldLock }), { ok: false, error: "name taken" }) && sheetState(game) === before,
+      `ranking-arreglos S2 the previous lock in grade ${grade} cannot save or log a hit after the claim`);
+  }
+}
+
+function unlockDuplicateRows() {
+  const game = load();
+  const name = "Tigre Veloz", lock = "1,2,3";
+  add(game, { lock });
+  const oldHash = game.rows()[0][7];
+  rankingPost(game, "unlock", { name });
+  add(game, { animal: "Panda", points: "900", lock: "4,5,6" });
+  game.sheets.Ranking.rows[2][3] = name; // a manually duplicated name with a real lock after the free row
+  const before = sheetState(game);
+  check(same(add(game, { lock }), { ok: false, error: "name taken" }) && sheetState(game) === before,
+    "ranking-arreglos S2 a free row cannot hide a conflicting real lock later in the sheet");
+  const otherColumns = game.rows().map((row) => row.slice(0, 7));
+  const result = rankingPost(game, "unlock", { name });
+  const [first, second] = game.rows();
+  check(same(result, { ok: true, grade: 5, name, points: 1200 }) && first[7] && first[7] !== oldHash && first[7] === second[7]
+    && same(game.rows().map((row) => row.slice(0, 7)), otherColumns),
+    "ranking-arreglos S2 unlock marks all matching non-empty locks free without changing either result");
 }
 
 // S1: identify the exact written row, including ties and old unlocked duplicates.
@@ -1527,6 +1662,10 @@ lockedBest();
 lockedScopesAndLegacy();
 differentNames();
 dateCellsAndForgottenLock();
+lockedNameAdmin();
+unlockValidation();
+claimUnlockedName();
+unlockDuplicateRows();
 ownPosition();
 ownPositionOutsideTop();
 lockRejections();

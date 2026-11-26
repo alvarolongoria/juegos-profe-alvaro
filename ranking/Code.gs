@@ -35,6 +35,8 @@
 //   action=keys&secret=...                      -> { month, keys: { "1": "🦁 león", ... } }
 //   action=setkey&grade=1&key=león&secret=...  -> changes a picture key
 //   action=setkey&grade=6&key=cometa&secret=... -> changes a word key
+//   action=names&grade=5&secret=...             -> this month's locked and released names
+//   action=unlock&grade=5&name=Tigre+Veloz&secret=... -> releases a name without losing its score
 // The secret is the Script Property BOT_SECRET (Project Settings > Script
 // Properties) or, without it, PRIVATE_BOT_SECRET from the private file that
 // ranking/deploy.sh adds. Never write it in this file: this file is public.
@@ -114,6 +116,7 @@ var BLOCKED_KEYS = ["caca", "culo", "pedo", "pene", "pito", "popo", "puta", "put
 
 var SHEET = "Ranking";
 var HEADER = ["Fecha", "Mes", "Curso", "Nombre", "Puntos", "Curso alumno", "Nivel", "Candado"];
+var FREE_LOCK = "LIBRE"; // Neither an emoji sequence nor a salted hash.
 // Grades that may also enter the ranking after level 3 (a level-4 finish always ranks above).
 var LEVEL_THREE_GRADES = [1, 2, 3, 4, 5, 6];
 var KEYS_SHEET = "Claves";
@@ -165,6 +168,8 @@ function doPost(e) {
     else if (params.action === "keys") result = readKeys();
     else if (params.action === "setkey") result = setKey(params);
     else if (params.action === "rotate") result = rotateKeys();
+    else if (params.action === "names") result = lockedNames(params);
+    else if (params.action === "unlock") result = unlockName(params);
     else result = { ok: false, error: "unknown action" };
   } catch (error) {
     result = { ok: false, error: "server error" };
@@ -514,6 +519,64 @@ function top(params) {
   return { ok: true, grade: grade, month: found.month, top: found.top };
 }
 
+function rankingName(animal, adjective) {
+  if (ANIMALS.indexOf(animal) < 0 || ADJECTIVES.indexOf(adjective) < 0) return null;
+  return animal + " " + adjective;
+}
+
+function isLockedRankingRow(row, month, grade) {
+  // Legacy rows without a lock are not reservations; a released name still is.
+  return !!row[7] && monthOf(row[1]) === month && Number(row[2]) === grade;
+}
+
+function rankingPoints(value) {
+  var points = Number(value);
+  return isFinite(points) ? points : 0;
+}
+
+function lockedNames(params) {
+  var grade = readGrade(params.grade);
+  if (grade === null) return { ok: false, error: "bad grade" };
+  var month = currentMonth();
+  var tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET);
+  var rows = tab ? tab.getDataRange().getValues().slice(1) : [];
+  var names = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (!isLockedRankingRow(row, month, grade)) continue;
+    var level = Number(row[6]);
+    names.push({
+      name: String(row[3]), points: rankingPoints(row[4]),
+      level: level && isFinite(level) ? level : 4, free: row[7] === FREE_LOCK,
+    });
+  }
+  names.sort(function (a, b) { return b.points - a.points; });
+  return { ok: true, grade: grade, names: names };
+}
+
+function unlockName(params) {
+  var grade = readGrade(params.grade);
+  if (grade === null) return { ok: false, error: "bad grade" };
+  var parts = typeof params.name === "string" ? params.name.split(" ") : [];
+  var name = parts.length === 2 ? rankingName(parts[0], parts[1]) : null;
+  if (name === null) return { ok: false, error: "bad name" };
+  return withLock(function () {
+    var month = currentMonth();
+    var tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET);
+    var rows = tab ? tab.getDataRange().getValues().slice(1) : [];
+    var points = null;
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (row[3] !== name || !isLockedRankingRow(row, month, grade)) continue;
+      // With duplicates, report the first row, which is also the first claim candidate.
+      if (points === null) points = rankingPoints(row[4]);
+      if (row[7] !== FREE_LOCK) tab.getRange(i + 2, 8).setValue(FREE_LOCK);
+    }
+    if (points === null) return { ok: false, error: "not found" };
+    return { ok: true, grade: grade, name: name, points: points };
+  });
+}
+
 // A goal the teacher typed. A blank, non-numeric or non-positive cell means
 // "use the default for this grade"; a number typed as text still counts.
 function goalValue(value, grade) {
@@ -644,7 +707,8 @@ function lockHash(salt, lock) {
 function add(params) {
   var grade = readGrade(params.grade);
   if (grade === null) return { ok: false, error: "bad grade" };
-  if (ANIMALS.indexOf(params.animal) < 0 || ADJECTIVES.indexOf(params.adjective) < 0) return { ok: false, error: "bad name" };
+  var name = rankingName(params.animal, params.adjective);
+  if (name === null) return { ok: false, error: "bad name" };
   // No level means the old page: a level-4 finish.
   var level = params.level === undefined ? 4 : Number(params.level);
   if (level !== 4 && !(level === 3 && LEVEL_THREE_GRADES.indexOf(grade) >= 0)) return { ok: false, error: "bad level" };
@@ -672,22 +736,27 @@ function add(params) {
     if (real === null) return { ok: false, error: "bad key" };
     // A key enters its own grade or an older one, never a younger one.
     if (real > grade) return { ok: false, error: "wrong grade", keyGrade: real };
-    var tab = sheet(), month = currentMonth(), name = params.animal + " " + params.adjective;
-    var stored = "", rowIndex = -1, oldRow;
+    var tab = sheet(), month = currentMonth();
+    var stored = "", rowIndex = -1, oldRow, claiming = false;
     if (emojiLock !== null) {
       var rows = tab.getDataRange().getValues().slice(1);
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i];
-        // Legacy rows have no owner and must not hide a later locked row.
-        if (monthOf(row[1]) !== month || Number(row[2]) !== grade || row[3] !== name || !row[7]) continue;
-        stored = String(row[7]);
-        var pieces = stored.split(":");
-        if (pieces.length !== 2 || lockHash(pieces[0], emojiLock) !== pieces[1]) return { ok: false, error: "name taken" };
-        rowIndex = i + 2;
-        oldRow = row;
-        break;
+        if (row[3] !== name || !isLockedRankingRow(row, month, grade)) continue;
+        var savedLock = String(row[7]), free = savedLock === FREE_LOCK;
+        if (!free) {
+          var pieces = savedLock.split(":");
+          if (pieces.length !== 2 || lockHash(pieces[0], emojiLock) !== pieces[1]) return { ok: false, error: "name taken" };
+        }
+        // Prefer a free row, but keep checking for conflicting locks on the same name.
+        if (rowIndex < 0 || (free && !claiming)) {
+          rowIndex = i + 2;
+          oldRow = row;
+          stored = savedLock;
+          claiming = free;
+        }
       }
-      if (rowIndex < 0) {
+      if (rowIndex < 0 || claiming) {
         var salt = Utilities.getUuid();
         stored = salt + ":" + lockHash(salt, emojiLock);
       }
@@ -701,6 +770,8 @@ function add(params) {
       var oldLevel = oldRow[6] === "" || oldRow[6] === undefined ? 4 : Number(oldRow[6]);
       if (level > oldLevel || (level === oldLevel && Number(params.points) > Number(oldRow[4]))) {
         tab.getRange(rowIndex, 1, 1, HEADER.length).setValues([values]);
+      } else if (claiming) {
+        tab.getRange(rowIndex, 8).setValue(stored);
       }
     }
     // The Ranking tab keeps only each pupil's best; the villain screen needs
